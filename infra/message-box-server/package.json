@@ -1,7 +1,6 @@
 {
-  "name": "@bsv/messagebox-server",
-  "private": true,
-  "version": "1.1.13",
+  "name": "@bopen-io/messagebox-server",
+  "version": "1.2.0",
   "main": "./out/src/compose.js",
   "exports": {
     ".": {
@@ -29,7 +28,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "BSV message-box server with composable mount API (build from ts-stack main)",
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/body-parser": "^1.19.6",
