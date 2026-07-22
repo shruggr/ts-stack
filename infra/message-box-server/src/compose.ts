@@ -68,7 +68,11 @@ export function mountMessageBoxRoutes (app: Express, ctx: MessageBoxContext): vo
 	router.use(
 		createAuthMiddleware({
 			wallet: ctx.wallet,
-			logger: ctx.logger
+			logger: ctx.logger,
+			// Share the host's session store when embedded, so a client that
+			// handshook once at /.well-known/auth is recognized here without a
+			// second handshake. Undefined (standalone) → its own store.
+			sessionManager: ctx.sessionManager
 		})
 	)
 
@@ -112,6 +116,7 @@ export function attachMessageBoxWebSockets (
 
 	const io = new AuthSocketServer(httpServer, {
 		wallet: ctx.wallet,
+		sessionManager: ctx.sessionManager,
 		cors: {
 			origin: '*',
 			methods: ['GET', 'POST']
