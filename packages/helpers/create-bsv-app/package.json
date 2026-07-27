@@ -1,31 +1,58 @@
 {
   "name": "create-bsv-app",
-  "version": "1.0.1",
+  "version": "1.0.2",
+  "sideEffects": false,
   "description": "The unified CLI and starter catalogue for creating BSV applications",
   "type": "module",
-  "main": "dist/index.js",
-  "bin": { "create-bsv-app": "dist/index.js" },
-  "files": ["dist", ".claude", "LICENSE.txt"],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "create-bsv-app": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    ".claude",
+    "README.md",
+    "LICENSE.txt"
+  ],
   "scripts": {
     "build": "tsc",
-    "test": "jest",
-    "lint": "ts-standard --fix src/**/*.ts",
-    "lint:ci": "ts-standard src/**/*.ts",
     "clean": "rm -rf dist coverage",
-    "dev": "node dist/index.js"
+    "dev": "node dist/index.js",
+    "format:check": "pnpm --workspace-root exec prettier --check \"packages/helpers/create-bsv-app/src/**/*.ts\" \"packages/helpers/create-bsv-app/README.md\" \"packages/helpers/create-bsv-app/*.{cjs,js,json}\"",
+    "lint": "oxlint src --deny-warnings",
+    "pack:check": "node ../../../scripts/check-package-artifact.mjs . --modes cli --bin create-bsv-app --bin-args --help",
+    "prepublishOnly": "pnpm build",
+    "test": "jest",
+    "test:property": "jest --runInBand --runTestsByPath src/config/__tests__/validate.property.test.ts",
+    "test:coverage": "jest --coverage --coverageReporters=text --coverageReporters=lcov",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
   },
-  "dependencies": { "@clack/prompts": "^0.7.0" },
+  "dependencies": {
+    "@clack/prompts": "^1.7.0"
+  },
   "devDependencies": {
     "@jest/globals": "^30.4.1",
     "@types/jest": "^30.0.0",
-    "@types/node": "^26.0.0",
+    "@types/node": "^26.1.1",
+    "fast-check": "^4.9.0",
     "jest": "^30.4.2",
-    "ts-jest": "^29.4.11",
-    "ts-standard": "^12.0.2",
-    "typescript": "^6.0.3"
+    "ts-jest": "^29.4.12",
+    "typescript": "^6.0.3",
+    "oxlint": "^1.75.0"
   },
-  "publishConfig": { "access": "public" },
-  "engines": { "node": ">=22" },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "author": "BSV Association",
   "license": "SEE LICENSE IN LICENSE.txt",
   "repository": {
@@ -33,11 +60,15 @@
     "url": "git+https://github.com/bsv-blockchain/ts-stack.git",
     "directory": "packages/helpers/create-bsv-app"
   },
-  "keywords": ["bsv", "bitcoin", "scaffolding", "starter", "wallet"],
-  "ts-standard": {
-    "project": "tsconfig.eslint.json",
-    "ignore": [
-      "dist"
-    ]
-  }
+  "homepage": "https://github.com/bsv-blockchain/ts-stack/tree/main/packages/helpers/create-bsv-app#readme",
+  "bugs": {
+    "url": "https://github.com/bsv-blockchain/ts-stack/issues"
+  },
+  "keywords": [
+    "bsv",
+    "bitcoin",
+    "scaffolding",
+    "starter",
+    "wallet"
+  ]
 }

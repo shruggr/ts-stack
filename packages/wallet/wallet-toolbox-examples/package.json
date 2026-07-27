@@ -11,7 +11,7 @@
     "directory": "packages/wallet/wallet-toolbox-examples"
   },
   "author": "Tone Engel",
-  "license": "SEE LICENSE IN license.md",
+  "license": "SEE LICENSE IN LICENSE.txt",
   "keywords": [
     "bsv",
     "babbage",
@@ -19,12 +19,14 @@
     "BRC100"
   ],
   "scripts": {
-    "test": "npm run build && jest --passWithNoTests",
-    "test:watch": "npm run build && jest --watch",
-    "test:coverage": "npm run build && jest --coverage",
-    "lint": "prettier --write 'src/**/*.ts' --log-level silent",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage --runInBand",
+    "lint": "oxlint src test jest.config.ts --deny-warnings",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"*.{ts,json,md}\" \"docs/**/*.md\"",
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
     "build": "tsc --build",
-    "prepublish": "npm run build && npm run doc",
+    "prepublish": "pnpm build && pnpm doc",
     "doc": "ts2md"
   },
   "bugs": {
@@ -32,29 +34,26 @@
   },
   "homepage": "https://github.com/bsv-blockchain/ts-stack/tree/main/packages/wallet/wallet-toolbox-examples#readme",
   "devDependencies": {
-    "@types/diff": "^8.0.0",
     "@types/fs-extra": "^11.0.4",
     "@types/jest": "^30.0.0",
-    "@types/jest-diff": "^24.3.0",
-    "@types/node": "^26.0.0",
-    "@types/node-fetch": "^2.6.2",
+    "@types/node": "^26.1.1",
+    "@types/node-fetch": "^2.6.13",
     "chalk": "^5.6.2",
     "dotenv": "^17.4.2",
-    "fake-indexeddb": "^6.0.0",
-    "fs-extra": "^11.3.5",
+    "fake-indexeddb": "^6.2.5",
+    "fs-extra": "^11.4.0",
     "jest": "^30.4.2",
     "jest-diff": "^30.4.1",
-    "jest-simple-summary": "^1.0.2",
-    "prettier": "^3.8.4",
+    "oxlint": "^1.75.0",
+    "prettier": "^3.9.6",
     "sqlite3": "^6.0.1",
-    "standard": "^17.1.0",
-    "ts-jest": "^29.4.11",
-    "ts-node": "^10.9.1",
+    "ts-jest": "^29.4.12",
+    "ts-node": "^10.9.2",
     "ts2md": "^0.2.8",
     "typescript": "^6.0.3"
   },
   "dependencies": {
-    "@bsv/sdk": "^2.1.6",
-    "@bsv/wallet-toolbox": "^2.3.3"
+    "@bsv/sdk": "workspace:^",
+    "@bsv/wallet-toolbox": "workspace:^"
   }
 }

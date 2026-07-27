@@ -1,4 +1,4 @@
-import { StasToken } from '../StasToken'
+import { StasToken } from '../StasToken.js'
 import { LockingScript } from '@bsv/sdk'
 
 // Build a synthetic classic STAS script matching stas-js CreateContract shape:
@@ -40,5 +40,14 @@ describe('StasToken.decode', () => {
     const decoded = StasToken.decode(LockingScript.fromHex(noSymbol))
     expect(decoded.symbol).toBeNull()
     expect(decoded.assetId).toMatch(/^stas:/)
+  })
+
+  it('removes control characters from the decoded symbol', () => {
+    const symbolWithSpace = '05' + '2054455354'
+    const decoded = StasToken.decode(
+      LockingScript.fromHex(`76a914${ownerHash160}88ac69${engine}6a${flagsPush}${symbolWithSpace}`)
+    )
+
+    expect(decoded.symbol).toBe('TEST')
   })
 })

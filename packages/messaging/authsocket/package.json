@@ -1,40 +1,48 @@
 {
   "name": "@bsv/authsocket",
-  "version": "2.1.0",
+  "version": "2.1.1",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
   "publishConfig": {
     "access": "public"
   },
   "description": "Mutually Authenticated Web Socket (Server-side)",
   "type": "module",
-  "main": "dist/cjs/mod.js",
-  "module": "dist/esm/mod.js",
-  "types": "dist/types/mod.d.ts",
+  "main": "./dist/mod.cjs",
+  "module": "./dist/mod.mjs",
+  "types": "./dist/mod.d.mts",
   "files": [
     "dist",
-    "src",
-    "docs",
-    "mod.ts",
+    "README.md",
     "LICENSE.txt"
   ],
   "exports": {
     ".": {
-      "import": "./dist/esm/mod.js",
-      "require": "./dist/cjs/mod.js",
-      "types": "./dist/types/mod.d.ts"
+      "import": {
+        "types": "./dist/mod.d.mts",
+        "default": "./dist/mod.mjs"
+      },
+      "require": {
+        "types": "./dist/mod.d.cts",
+        "default": "./dist/mod.cjs"
+      }
     },
     "./package.json": "./package.json"
   },
   "scripts": {
-    "test": "npm run build && jest",
-    "test:watch": "npm run build && jest --watch",
-    "test:coverage": "npm run build && jest --coverage",
-    "lint": "ts-standard --fix src/**/*.ts",
-    "build": "npm run build:ts",
-    "build:ts": "tsc -b && tsconfig-to-dual-package tsconfig.cjs.json",
-    "build:umd": "webpack --config webpack.config.js",
-    "dev": "tsc -b -w",
-    "prepublish": "npm run build",
-    "doc": "ts2md"
+    "build": "tsdown mod.ts --format cjs,esm --dts --sourcemap --clean --out-dir dist --platform node --tsconfig tsconfig.base.json --unbundle",
+    "dev": "pnpm build --watch",
+    "doc": "ts2md",
+    "format:check": "pnpm --workspace-root exec prettier --check \"packages/messaging/authsocket/**/*.{js,json,ts}\"",
+    "lint": "oxlint mod.ts src test --deny-warnings",
+    "pack:check": "node ../../../scripts/check-package-artifact.mjs . --exports AuthSocket,AuthSocketServer,SocketServerTransport",
+    "prepublishOnly": "pnpm build",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "test:watch": "jest --watch",
+    "typecheck": "tsc --project tsconfig.typecheck.json"
   },
   "repository": {
     "type": "git",
@@ -55,23 +63,18 @@
   },
   "homepage": "https://github.com/bsv-blockchain/ts-stack/tree/main/packages/messaging/authsocket#readme",
   "dependencies": {
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
-    "@bsv/authsocket-client": "^2.1.0",
-    "@bsv/message-box-client": "^2.2.0",
+    "@bsv/sdk": "workspace:^",
     "@types/jest": "^30.0.0",
+    "@types/node": "^26.1.1",
     "jest": "^30.4.2",
-    "jest-environment-jsdom": "^30.4.1",
-    "ts-jest": "^29.4.11",
-    "ts-loader": "^9.6.2",
-    "ts-standard": "^12.0.2",
-    "ts2md": "^0.2.5",
-    "tsconfig-to-dual-package": "^1.2.0",
-    "typescript": "^6.0.3",
-    "webpack": "^5.107.2",
-    "webpack-cli": "^7.0.3",
-    "@bsv/sdk": "workspace:^"
+    "oxlint": "^1.75.0",
+    "ts-jest": "^29.4.12",
+    "ts2md": "^0.2.8",
+    "tsdown": "0.22.14",
+    "typescript": "^6.0.3"
   },
   "peerDependencies": {
     "@bsv/sdk": "^2.1.6"

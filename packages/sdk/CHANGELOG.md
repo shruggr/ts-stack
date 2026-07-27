@@ -216,6 +216,17 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Added
 
+- Add explicit script-verification context and a distinct resource-exhaustion
+  error so transaction version and local interpreter limits cannot be mistaken
+  for consensus validity.
+- Add an optional compact-byte Wallet Wire lane while preserving the existing
+  `number[]` transport contract for older and third-party substrates.
+- Add opt-in, provider-neutral telemetry with scalar event attributes,
+  correlation IDs, sink isolation, severity filtering, and centralized
+  secret redaction.
+- Add `LookupResolver.queryDetailed()` and per-outcome host-settlement counts
+  so security-sensitive callers can distinguish authoritative empty answers
+  from partial availability.
 - Release prep for `2.1.8`: transaction, BEEF, signature-hash, and deep-graph
   performance improvements described below.
 - Add explicit zero-copy `Uint8Array` transaction/BEEF parsing APIs, lazy raw-transaction
@@ -224,6 +235,19 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Changed
 
+- Pre-size Wallet Wire frames and keep large BRC-100 binary arguments/results
+  as `Uint8Array` views through processor/transceiver handoff. The optional
+  compact-byte substrate avoids redundant response writers and aggregate
+  copies while the legacy `number[]` transport and every BRC-100 shape remain
+  unchanged.
+- Remove arbitrary post-Genesis script element and default interpreter-memory
+  caps; explicit caller budgets remain enforceable but are not reported as
+  invalid scripts.
+- Keep large hex, Atomic BEEF, and binary Wallet Wire payloads in
+  `Uint8Array` storage, cache repeat Atomic BEEF serialization, and invalidate
+  that cache when the graph changes.
+- Instrument overlay lookup lifecycle and host outcomes without emitting lookup
+  query payloads or host URL paths.
 - Make transaction signing/verification share BIP143 hash components, replace recursive
   spend-chain traversal with iterative work queues, and use indexed O(V+E) BEEF graph operations.
 - Keep copy-safe parsing as the default while eliminating intermediate boxed-byte and script copies.

@@ -7,7 +7,6 @@ import {
   CreateActionOptions,
   CreateActionOutput,
   CreateActionResult,
-  KeyDeriver,
   KeyDeriverApi,
   LockingScript,
   P2PKH,
@@ -16,6 +15,7 @@ import {
   ScriptTemplateUnlock,
   WalletInterface
 } from '@bsv/sdk'
+import type { SpendVerifierInterface } from '@bsv/sdk'
 import { fundWalletFromP2PKHOutpoints as _fundWalletFromP2PKHOutpoints } from './fundWalletP2PKH'
 import { Chain } from './sdk/types'
 import { randomBytesHex, verifyTruthy } from './utility/utilityHelpers'
@@ -46,7 +46,7 @@ export abstract class Setup {
    * @param chain
    * @returns true if .env is not valid for chain
    */
-  static noEnv (chain: Chain): boolean {
+  static noEnv(chain: Chain): boolean {
     try {
       Setup.getEnv(chain)
       return false
@@ -65,7 +65,7 @@ export abstract class Setup {
    *
    * @publicbody
    */
-  static makeEnv (): string {
+  static makeEnv(): string {
     const testPrivKey1 = PrivateKey.fromRandom()
     const testIdentityKey1 = testPrivKey1.toPublicKey().toString()
     const testPrivKey2 = PrivateKey.fromRandom()
@@ -81,8 +81,8 @@ MY_TEST_IDENTITY = '${testIdentityKey1}'
 MY_TEST_IDENTITY2 = '${testIdentityKey2}'
 MY_MAIN_IDENTITY = '${mainIdentityKey1}'
 MY_MAIN_IDENTITY2 = '${mainIdentityKey2}'
-MAIN_TAAL_API_KEY='mainnet_9596de07e92300c6287e4393594ae39c'
-TEST_TAAL_API_KEY='testnet_0e6cf72133b43ea2d7861da2a38684e3'
+MAIN_TAAL_API_KEY='replace-with-your-mainnet-api-key'
+TEST_TAAL_API_KEY='replace-with-your-testnet-api-key'
 MYSQL_CONNECTION='{"port":3306,"host":"127.0.0.1","user":"root","password":"your_password","database":"your_database", "timezone": "Z"}'
 DEV_KEYS = '{
     "${testIdentityKey1}": "${testPrivKey1.toString()}",
@@ -108,7 +108,7 @@ DEV_KEYS = '{
    *
    * @publicbody
    */
-  static getEnv (chain: Chain): SetupEnv {
+  static getEnv(chain: Chain): SetupEnv {
     // Identity keys of the lead maintainer of this repo...
     const identityKey = chain === 'main' ? process.env.MY_MAIN_IDENTITY : process.env.MY_TEST_IDENTITY
     const identityKey2 = chain === 'main' ? process.env.MY_MAIN_IDENTITY2 : process.env.MY_TEST_IDENTITY2
@@ -141,7 +141,7 @@ DEV_KEYS = '{
    *
    * @publicbody
    */
-  static async createWallet (args: SetupWalletArgs): Promise<SetupWallet> {
+  static async createWallet(args: SetupWalletArgs): Promise<SetupWallet> {
     const chain = args.env.chain
     args.rootKeyHex ||= args.env.devKeys[args.env.identityKey]
     const rootKey = PrivateKey.fromHex(args.rootKeyHex)
@@ -158,16 +158,16 @@ DEV_KEYS = '{
     const services = new Services(serviceOptions)
     const monopts = Monitor.createDefaultWalletMonitorOptions(chain, storage, services, undefined, 'default')
     const monitor = new Monitor(monopts)
-    const privilegedKeyManager = (args.privilegedKeyGetter != null)
-      ? new PrivilegedKeyManager(args.privilegedKeyGetter)
-      : undefined
+    const privilegedKeyManager =
+      args.privilegedKeyGetter != null ? new PrivilegedKeyManager(args.privilegedKeyGetter) : undefined
     const wallet = new Wallet({
       chain,
       keyDeriver,
       storage,
       services,
       monitor,
-      privilegedKeyManager
+      privilegedKeyManager,
+      scriptVerifier: args.scriptVerifier
     })
     const r: SetupWallet = {
       rootKey,
@@ -190,11 +190,12 @@ DEV_KEYS = '{
    * @param args.storageUrl - Optional. `StorageClient` and `chain` compatible endpoint URL.
    * @param args.privilegedKeyGetter - Optional. Method that will return the privileged `PrivateKey`, on demand.
    */
-  static async createWalletClientNoEnv (args: {
+  static async createWalletClientNoEnv(args: {
     chain: Chain
     rootKeyHex: string
     storageUrl?: string
     privilegedKeyGetter?: () => Promise<PrivateKey>
+    scriptVerifier?: SpendVerifierInterface
   }): Promise<Wallet> {
     const chain = args.chain
     const endpointUrl = args.storageUrl || `https://${args.chain !== 'main' ? 'staging-' : ''}storage.babbage.systems`
@@ -202,15 +203,15 @@ DEV_KEYS = '{
     const keyDeriver = new CachedKeyDeriver(rootKey)
     const storage = new WalletStorageManager(keyDeriver.identityKey)
     const services = new Services(chain)
-    const privilegedKeyManager = (args.privilegedKeyGetter != null)
-      ? new PrivilegedKeyManager(args.privilegedKeyGetter)
-      : undefined
+    const privilegedKeyManager =
+      args.privilegedKeyGetter != null ? new PrivilegedKeyManager(args.privilegedKeyGetter) : undefined
     const wallet = new Wallet({
       chain,
       keyDeriver,
       storage,
       services,
-      privilegedKeyManager
+      privilegedKeyManager,
+      scriptVerifier: args.scriptVerifier
     })
     const client = new StorageClient(wallet, endpointUrl)
     await storage.addWalletStorageProvider(client)
@@ -221,7 +222,7 @@ DEV_KEYS = '{
   /**
    * @publicbody
    */
-  static async createWalletClient (args: SetupWalletClientArgs): Promise<SetupWalletClient> {
+  static async createWalletClient(args: SetupWalletClientArgs): Promise<SetupWalletClient> {
     const wo = await Setup.createWallet(args)
 
     const endpointUrl =
@@ -239,7 +240,7 @@ DEV_KEYS = '{
   /**
    * @publicbody
    */
-  static getKeyPair (priv?: string | PrivateKey): KeyPairAddress {
+  static getKeyPair(priv?: string | PrivateKey): KeyPairAddress {
     if (priv === undefined) priv = PrivateKey.fromRandom()
     else if (typeof priv === 'string') priv = new PrivateKey(priv, 'hex')
 
@@ -251,7 +252,7 @@ DEV_KEYS = '{
   /**
    * @publicbody
    */
-  static getLockP2PKH (address: string): LockingScript {
+  static getLockP2PKH(address: string): LockingScript {
     const p2pkh = new P2PKH()
     const lock = p2pkh.lock(address)
     return lock
@@ -260,7 +261,7 @@ DEV_KEYS = '{
   /**
    * @publicbody
    */
-  static getUnlockP2PKH (priv: PrivateKey, satoshis: number): ScriptTemplateUnlock {
+  static getUnlockP2PKH(priv: PrivateKey, satoshis: number): ScriptTemplateUnlock {
     const p2pkh = new P2PKH()
     const lock = Setup.getLockP2PKH(Setup.getKeyPair(priv).address)
     // Prepare to pay with SIGHASH_ALL and without ANYONE_CAN_PAY.
@@ -275,7 +276,7 @@ DEV_KEYS = '{
   /**
    * @publicbody
    */
-  static createP2PKHOutputs (
+  static createP2PKHOutputs(
     outputs: Array<{
       address: string
       satoshis: number
@@ -302,7 +303,7 @@ DEV_KEYS = '{
   /**
    * @publicbody
    */
-  static async createP2PKHOutputsAction (
+  static async createP2PKHOutputsAction(
     wallet: WalletInterface,
     outputs: Array<{
       address: string
@@ -313,9 +314,9 @@ DEV_KEYS = '{
     }>,
     options?: CreateActionOptions
   ): Promise<{
-      cr: CreateActionResult
-      outpoints: string[] | undefined
-    }> {
+    cr: CreateActionResult
+    outpoints: string[] | undefined
+  }> {
     const os = Setup.createP2PKHOutputs(outputs)
 
     const createArgs: CreateActionArgs = {
@@ -342,12 +343,12 @@ DEV_KEYS = '{
   /**
    * @publicbody
    */
-  static async fundWalletFromP2PKHOutpoints (
+  static async fundWalletFromP2PKHOutpoints(
     wallet: WalletInterface,
     outpoints: string[],
     p2pkhKey: KeyPairAddress,
     inputBEEF?: BEEF
-  ): Promise<Array<{ outpoint: string, txid?: string, success: boolean, error?: string }>> {
+  ): Promise<Array<{ outpoint: string; txid?: string; success: boolean; error?: string }>> {
     return await _fundWalletFromP2PKHOutpoints(wallet, outpoints, p2pkhKey, Setup.getUnlockP2PKH.bind(Setup), inputBEEF)
   }
 
@@ -363,7 +364,7 @@ DEV_KEYS = '{
    *
    * @publicbody
    */
-  static async createWalletKnex (args: SetupWalletKnexArgs): Promise<SetupWalletKnex> {
+  static async createWalletKnex(args: SetupWalletKnexArgs): Promise<SetupWalletKnex> {
     const wo = await Setup.createWallet(args)
     const activeStorage = await Setup.createStorageKnex(args)
     await wo.storage.addWalletStorageProvider(activeStorage)
@@ -380,7 +381,7 @@ DEV_KEYS = '{
   /**
    * @returns {StorageKnex} - `Knex` based storage provider for a wallet. May be used for either active storage or backup storage.
    */
-  static async createStorageKnex (args: SetupWalletKnexArgs): Promise<StorageKnex> {
+  static async createStorageKnex(args: SetupWalletKnexArgs): Promise<StorageKnex> {
     // Create a temporary wallet setup to consistently resolve optional args.
     const wo = await Setup.createWallet(args)
     const storage = new StorageKnex({
@@ -388,7 +389,8 @@ DEV_KEYS = '{
       knex: args.knex,
       commissionSatoshis: 0,
       commissionPubKeyHex: undefined,
-      feeModel: { model: 'sat/kb', value: 100 }
+      feeModel: { model: 'sat/kb', value: 100 },
+      scriptVerifier: args.scriptVerifier
     })
     await storage.migrate(args.databaseName, randomBytesHex(33))
     await storage.makeAvailable()
@@ -399,7 +401,7 @@ DEV_KEYS = '{
   /**
    * @publicbody
    */
-  static createSQLiteKnex (filename: string): Knex {
+  static createSQLiteKnex(filename: string): Knex {
     const config: Knex.Config = {
       client: 'better-sqlite3',
       connection: { filename },
@@ -412,7 +414,7 @@ DEV_KEYS = '{
   /**
    * @publicbody
    */
-  static createMySQLKnex (connection: string, database?: string): Knex {
+  static createMySQLKnex(connection: string, database?: string): Knex {
     const c: Knex.MySql2ConnectionConfig = JSON.parse(connection)
     if (database) {
       c.database = database
@@ -430,7 +432,7 @@ DEV_KEYS = '{
   /**
    * @publicbody
    */
-  static async createWalletMySQL (args: SetupWalletMySQLArgs): Promise<SetupWalletKnex> {
+  static async createWalletMySQL(args: SetupWalletMySQLArgs): Promise<SetupWalletKnex> {
     return await this.createWalletKnex({
       ...args,
       knex: Setup.createMySQLKnex(args.env.mySQLConnection, args.databaseName)
@@ -440,7 +442,7 @@ DEV_KEYS = '{
   /**
    * @publicbody
    */
-  static async createWalletSQLite (args: SetupWalletSQLiteArgs): Promise<SetupWalletKnex> {
+  static async createWalletSQLite(args: SetupWalletSQLiteArgs): Promise<SetupWalletKnex> {
     return await this.createWalletKnex({
       ...args,
       knex: Setup.createSQLiteKnex(args.filePath)
@@ -482,6 +484,11 @@ export interface SetupWalletArgs {
    * Optional. One or more storage providers managed as backup destinations. Can be added later.
    */
   backups?: WalletStorageProvider[]
+  /**
+   * Optional high-performance verifier for internal wallet and locally hosted
+   * storage validation. This does not alter the BRC-100 interface.
+   */
+  scriptVerifier?: SpendVerifierInterface
 }
 
 /**

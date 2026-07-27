@@ -2,9 +2,15 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals'
 import OverlayExpress from '../OverlayExpress.js'
 import Knex from 'knex'
 import { MongoClient } from 'mongodb'
-import { TopicManager, LookupService } from '@bsv/overlay'
+import {
+  TopicManager,
+  LookupService,
+  serializeErrorForLog,
+  serializeLogValue
+} from '@bsv/overlay'
 import { ChainTracker } from '@bsv/sdk'
 import * as DiscoveryServices from '@bsv/overlay-discovery-services'
+import { createAuthMiddleware } from '@bsv/auth-express-middleware'
 
 // Mock dependencies
 jest.mock('knex')
@@ -12,6 +18,9 @@ jest.mock('mongodb')
 jest.mock('@bsv/overlay')
 jest.mock('@bsv/sdk')
 jest.mock('@bsv/overlay-discovery-services')
+jest.mock('@bsv/auth-express-middleware', () => ({
+  createAuthMiddleware: jest.fn(() => jest.fn())
+}))
 
 /** Creates a mock MongoDB Db object with a collection stub that supports BanService */
 function createMockDbValue (): Record<string, any> {
@@ -35,6 +44,18 @@ describe('OverlayExpress', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    jest.mocked(serializeLogValue).mockImplementation(value => {
+      try {
+        return JSON.stringify(value) ?? '"[Unserializable value]"'
+      } catch {
+        return '"[Unserializable value]"'
+      }
+    })
+    jest.mocked(serializeErrorForLog).mockImplementation(error =>
+      serializeLogValue(error instanceof Error
+        ? { name: error.name, message: error.message, stack: error.stack }
+        : error)
+    )
     overlayExpress = new OverlayExpress(
       'TestService',
       'test-private-key-123',
@@ -159,6 +180,132 @@ describe('OverlayExpress', () => {
       })
       expect(overlayExpress.janitorConfig.requestTimeoutMs).toBe(20000)
       expect(overlayExpress.janitorConfig.hostDownRevokeScore).toBe(10)
+    })
+  })
+
+  describe('configureEdgePolicy', () => {
+    it('preserves public browser access unless an allowlist is configured', () => {
+      expect(overlayExpress.edgePolicyConfig.allowedOrigins).toBeUndefined()
+
+      overlayExpress.configureEdgePolicy({
+        allowedOrigins: ['https://wallet.example']
+      })
+
+      expect(overlayExpress.edgePolicyConfig.allowedOrigins).toEqual([
+        'https://wallet.example'
+      ])
+    })
+
+    it('merges partial HTTP and browser-header policy without erasing defaults', () => {
+      const defaultBodyLimit = overlayExpress.edgePolicyConfig.jsonBodyLimitBytes
+      const defaultSocketTimeout = overlayExpress.edgePolicyConfig.http.socketTimeoutMs
+
+      overlayExpress.configureEdgePolicy({
+        jsonBodyLimitBytes: undefined,
+        http: {
+          requestTimeoutMs: 45_000,
+          socketTimeoutMs: undefined
+        },
+        securityHeaders: {
+          crossOriginOpenerPolicy: 'same-origin-allow-popups',
+          frameOptions: false
+        }
+      })
+
+      expect(overlayExpress.edgePolicyConfig.jsonBodyLimitBytes).toBe(defaultBodyLimit)
+      expect(overlayExpress.edgePolicyConfig.http.requestTimeoutMs).toBe(45_000)
+      expect(overlayExpress.edgePolicyConfig.http.socketTimeoutMs).toBe(defaultSocketTimeout)
+      expect(overlayExpress.edgePolicyConfig.securityHeaders).toMatchObject({
+        crossOriginOpenerPolicy: 'same-origin-allow-popups',
+        frameOptions: false
+      })
+      expect(overlayExpress.edgePolicyConfig.securityHeaders.contentSecurityPolicy).toContain(
+        "default-src 'none'"
+      )
+    })
+  })
+
+  describe('security-safe diagnostics', () => {
+    it('logs body metadata without serializing payload contents', () => {
+      const instance = overlayExpress as any
+
+      expect(instance.formatBodyForLog(Buffer.from('secret'), 'Body:')).toContain(
+        'binary body (6 bytes)'
+      )
+      expect(instance.formatBodyForLog('secret', 'Body:')).toContain(
+        'string body (6 bytes)'
+      )
+      expect(instance.formatBodyForLog(['secret'], 'Body:')).toContain(
+        'structured body (1 top-level item(s))'
+      )
+      expect(instance.formatBodyForLog({ secret: true }, 'Body:')).toContain(
+        'structured body (1 top-level item(s))'
+      )
+      expect(instance.formatBodyForLog(undefined, 'Body:')).toContain('undefined')
+    })
+
+    it('redacts authentication and payment headers while preserving safe metadata', () => {
+      const result = (overlayExpress as any).redactHeadersForLog({
+        authorization: 'Bearer private',
+        cookie: 'session=private',
+        'x-bsv-payment': 'private',
+        'x-bsv-auth-nonce': 'private',
+        'content-type': 'application/json'
+      })
+
+      expect(result).toEqual({
+        authorization: '[REDACTED]',
+        cookie: '[REDACTED]',
+        'x-bsv-payment': '[REDACTED]',
+        'x-bsv-auth-nonce': '[REDACTED]',
+        'content-type': 'application/json'
+      })
+    })
+
+    it('keeps verbose request and response metadata on a single log line', () => {
+      const instance = overlayExpress as any
+      const logger = {
+        log: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn()
+      }
+      instance.logger = logger
+      const useSpy = jest.spyOn(instance.app, 'use')
+      instance.setupVerboseRequestLogging()
+      const middleware = useSpy.mock.calls[useSpy.mock.calls.length - 1]?.[0] as any
+      let finishHandler: (() => void) | undefined
+      const request = {
+        method: 'GET\r\nFORGED',
+        originalUrl: '/lookup\r\nFORGED',
+        headers: { 'x-test': 'value\r\nFORGED' },
+        body: undefined
+      }
+      const response: any = {
+        statusCode: 200,
+        send: jest.fn(),
+        on: jest.fn((event: string, handler: () => void) => {
+          if (event === 'finish') finishHandler = handler
+        }),
+        getHeaders: jest.fn(() => ({ 'x-test': 'value\r\nFORGED' }))
+      }
+
+      middleware(request, response, jest.fn())
+      finishHandler?.()
+
+      const messages = logger.log.mock.calls.flat()
+        .filter((value): value is string => typeof value === 'string')
+      expect(messages.join(' ')).toContain('\\r\\nFORGED')
+      expect(messages.every(message => !/[\r\n\u2028\u2029]/.test(message))).toBe(true)
+    })
+
+    it('removes internal health-check details when configured', async () => {
+      overlayExpress.healthConfig.includeDetails = false
+
+      const report = await (overlayExpress as any).collectHealthReport('live')
+
+      expect(report.checks).toHaveLength(1)
+      expect(report.checks[0].name).toBe('process')
+      expect(report.checks[0].details).toBeUndefined()
     })
   })
 
@@ -488,7 +635,7 @@ describe('OverlayExpress', () => {
       // Just verify the method can be called
       try {
         await freshInstance.configureEngine()
-      } catch (e) {
+      } catch {
         // May fail for other reasons like missing dependencies
       }
       expect(true).toBe(true)
@@ -782,6 +929,177 @@ describe('OverlayExpress', () => {
       expect(getSpy).toHaveBeenCalled()
       expect(postSpy).toHaveBeenCalled()
       expect(listenSpy).toHaveBeenCalledWith(3000, expect.any(Function))
+    })
+
+    it('passes a configured async session manager to BSV auth middleware', async () => {
+      const sessionManager = {
+        addSession: jest.fn<any>().mockResolvedValue(undefined),
+        updateSession: jest.fn<any>().mockResolvedValue(undefined),
+        getSession: jest.fn<any>().mockResolvedValue(undefined),
+        removeSession: jest.fn<any>().mockResolvedValue(undefined),
+        hasSession: jest.fn<any>().mockResolvedValue(false)
+      }
+      instance.serverWallet = {} as any
+      instance.configureAuthSessionManager(sessionManager)
+      jest.spyOn(instance.app, 'listen').mockImplementation((port: any, callback: any) => {
+        callback()
+        return {} as any
+      })
+
+      await instance.start()
+
+      expect(createAuthMiddleware).toHaveBeenCalledWith(expect.objectContaining({
+        wallet: instance.serverWallet,
+        sessionManager,
+        allowUnauthenticated: true
+      }))
+    })
+
+    it('does not expose internal engine errors in public responses', async () => {
+      const getSpy = jest.spyOn(instance.app, 'get')
+      jest.spyOn(instance.app, 'listen').mockImplementation((port: any, callback: any) => {
+        callback()
+        return {} as any
+      })
+      mockEngine.listTopicManagers.mockRejectedValueOnce(
+        new Error('database password appeared in a driver error')
+      )
+      await instance.start()
+
+      const route = getSpy.mock.calls.find(call => call[0] === '/listTopicManagers')
+      const handler: any = route === undefined ? undefined : route[route.length - 1]
+      const res: any = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn().mockReturnThis()
+      }
+      handler?.({}, res)
+      await new Promise(resolve => setImmediate(resolve))
+
+      expect(res.status).toHaveBeenCalledWith(400)
+      expect(res.json).toHaveBeenCalledWith({
+        status: 'error',
+        message: 'Request could not be processed'
+      })
+    })
+
+    it('accepts canonical and legacy X-Topics formats on /submit', async () => {
+      const postSpy = jest.spyOn(instance.app, 'post')
+      jest.spyOn(instance.app, 'listen').mockImplementation((port: any, callback: any) => {
+        callback()
+        return {} as any
+      })
+      await instance.start()
+
+      const route = postSpy.mock.calls.find(call => call[0] === '/submit')
+      const handler: any = route === undefined ? undefined : route[route.length - 1]
+      expect(handler).toBeDefined()
+
+      for (const topicsHeader of ['tm_foo,tm_bar', '["tm_foo","tm_bar"]']) {
+        const res: any = {
+          status: jest.fn().mockReturnThis(),
+          json: jest.fn().mockReturnThis()
+        }
+        handler?.({
+          headers: { 'x-topics': topicsHeader },
+          body: Buffer.from([1, 2, 3])
+        }, res)
+        await new Promise(resolve => setImmediate(resolve))
+      }
+
+      expect(mockEngine.submit).toHaveBeenCalledTimes(2)
+      for (const call of mockEngine.submit.mock.calls) {
+        expect(call[0]).toEqual({
+          beef: [1, 2, 3],
+          topics: ['tm_foo', 'tm_bar'],
+          offChainValues: undefined
+        })
+      }
+    })
+
+    it('returns a clean 400 for an empty /submit body', async () => {
+      const postSpy = jest.spyOn(instance.app, 'post')
+      jest.spyOn(instance.app, 'listen').mockImplementation((port: any, callback: any) => {
+        callback()
+        return {} as any
+      })
+      const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {})
+      await instance.start()
+
+      const route = postSpy.mock.calls.find(call => call[0] === '/submit')
+      const handler: any = route === undefined ? undefined : route[route.length - 1]
+      const res: any = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn().mockReturnThis()
+      }
+      handler?.({ headers: { 'x-topics': 'tm_foo' }, body: undefined }, res)
+      await new Promise(resolve => setImmediate(resolve))
+
+      expect(res.status).toHaveBeenCalledWith(400)
+      expect(res.json).toHaveBeenCalledWith({
+        status: 'error',
+        message: 'Missing or empty BEEF body'
+      })
+      expect(mockEngine.submit).not.toHaveBeenCalled()
+      consoleError.mockRestore()
+    })
+
+    it.each([
+      ['', 'an empty comma-separated list'],
+      ['tm_foo,', 'an empty comma-separated topic'],
+      ['["tm_foo"', 'malformed JSON'],
+      ['["tm_foo",42]', 'a JSON array containing a non-string topic']
+    ])('returns a clean 400 when X-Topics is %s (%s)', async (topicsHeader) => {
+      const postSpy = jest.spyOn(instance.app, 'post')
+      jest.spyOn(instance.app, 'listen').mockImplementation((port: any, callback: any) => {
+        callback()
+        return {} as any
+      })
+      const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {})
+      await instance.start()
+
+      const route = postSpy.mock.calls.find(call => call[0] === '/submit')
+      const handler: any = route === undefined ? undefined : route[route.length - 1]
+      const res: any = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn().mockReturnThis()
+      }
+      handler?.({
+        headers: { 'x-topics': topicsHeader },
+        body: Buffer.from([1, 2, 3])
+      }, res)
+      await new Promise(resolve => setImmediate(resolve))
+
+      expect(res.status).toHaveBeenCalledWith(400)
+      expect(res.json).toHaveBeenCalledWith({
+        status: 'error',
+        message: 'Invalid x-topics header: expected a comma-separated list or JSON string array'
+      })
+      expect(mockEngine.submit).not.toHaveBeenCalled()
+      consoleError.mockRestore()
+    })
+
+    it('returns a clean 400 when /admin/health-check has no body', async () => {
+      const postSpy = jest.spyOn(instance.app, 'post')
+      jest.spyOn(instance.app, 'listen').mockImplementation((port: any, callback: any) => {
+        callback()
+        return {} as any
+      })
+      await instance.start()
+
+      const route = postSpy.mock.calls.find(call => call[0] === '/admin/health-check')
+      const handler: any = route === undefined ? undefined : route[route.length - 1]
+      const res: any = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn().mockReturnThis()
+      }
+      handler?.({ body: undefined }, res)
+      await new Promise(resolve => setImmediate(resolve))
+
+      expect(res.status).toHaveBeenCalledWith(400)
+      expect(res.json).toHaveBeenCalledWith({
+        status: 'error',
+        message: 'url is required'
+      })
     })
 
     it('should set up CORS middleware', async () => {
@@ -1098,7 +1416,8 @@ describe('OverlayExpress', () => {
         revokeAdvertisements: jest.fn(),
         parseAdvertisement: jest.fn()
       }
-      instance.engine!.advertiser = mockAdvertiser
+      if (instance.engine === undefined) throw new Error('improper test setup')
+      instance.engine.advertiser = mockAdvertiser
 
       jest.spyOn(instance.app, 'listen').mockImplementation((port: any, callback: any) => {
         callback()

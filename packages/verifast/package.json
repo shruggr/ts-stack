@@ -1,51 +1,124 @@
 {
   "name": "@bsv/verifast",
-  "version": "0.2.0",
+  "version": "0.3.0",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bsv-blockchain/ts-stack.git",
     "directory": "packages/verifast"
   },
+  "homepage": "https://github.com/bsv-blockchain/ts-stack/tree/main/packages/verifast#readme",
+  "bugs": {
+    "url": "https://github.com/bsv-blockchain/ts-stack/issues"
+  },
   "type": "module",
   "description": "Optional C++/WASM (BDK) transaction script-verification backend for @bsv/sdk",
-  "main": "dist/mod.js",
+  "author": "BSV Blockchain Association",
+  "keywords": [
+    "bsv",
+    "bitcoin-script",
+    "verification",
+    "wasm",
+    "worker"
+  ],
+  "license": "SEE LICENSE IN LICENSE.txt",
+  "main": "dist/cjs/mod.cjs",
+  "module": "dist/mod.js",
   "types": "dist/mod.d.ts",
   "files": [
     "dist",
-    "src",
-    "mod.ts",
-    "README.md"
+    "README.md",
+    "LICENSE.txt"
   ],
   "exports": {
     ".": {
-      "types": "./dist/mod.d.ts",
-      "import": "./dist/mod.js"
-    }
+      "browser": {
+        "types": "./dist/mod.browser.d.ts",
+        "default": "./dist/mod.browser.js"
+      },
+      "import": {
+        "types": "./dist/mod.d.ts",
+        "default": "./dist/mod.js"
+      },
+      "require": {
+        "types": "./dist/mod.d.cts",
+        "default": "./dist/cjs/mod.cjs"
+      },
+      "default": "./dist/mod.js"
+    },
+    "./umd": {
+      "browser": "./dist/umd/verifast.js",
+      "import": {
+        "types": "./dist/umd.d.ts",
+        "default": "./dist/umd.js"
+      },
+      "require": {
+        "types": "./dist/umd.d.cts",
+        "default": "./dist/umd/verifast.cjs"
+      },
+      "default": "./dist/umd.js"
+    },
+    "./wasm/bdk-core.umd.js": "./dist/src/wasm/bdk-core.umd.js",
+    "./wasm/bdk-core.umd.wasm": "./dist/src/wasm/bdk-core.umd.wasm",
+    "./wasm/bdk-core.wasm": "./dist/src/wasm/bdk-core.wasm"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+    "build": "node scripts/check-artifacts.mjs && node scripts/clean.mjs && tsc -p tsconfig.build.json && node scripts/copy-wasm.mjs && node scripts/build-cjs.mjs && rspack --config rspack.config.js && node scripts/copy-umd.mjs && node scripts/check-bundle-size.mjs",
+    "test": "pnpm build && NODE_OPTIONS=--experimental-vm-modules jest && node scripts/test-node-consumers.mjs && node scripts/test-browser-bundler.mjs",
+    "test:coverage": "pnpm build && NODE_OPTIONS=--experimental-vm-modules jest --coverage --watchman=false",
+    "test:property": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand --watchman=false --runTestsByPath src/__tests/BdkBatch.property.test.ts",
+    "format:check": "pnpm --workspace-root exec prettier --check \"packages/verifast/README.md\" \"packages/verifast/*.{js,json,mjs,ts}\" \"packages/verifast/{bench,browser,scripts}/**/*.{js,json,md,mjs,ts}\" \"packages/verifast/src/{*.ts,__tests/**/*.ts,workers/**/*.ts}\"",
+    "lint": "oxlint mod.ts mod.browser.ts umd.ts bench browser scripts src --ignore-pattern 'src/wasm/bdk-core.*' --deny-warnings",
+    "pack:check": "pnpm build && node ../../scripts/check-package-artifact.mjs . --untyped-asset-entrypoints ./wasm/bdk-core.umd.js,./wasm/bdk-core.umd.wasm,./wasm/bdk-core.wasm --exports BDK_FLAG_BITS,BdkErrorDomain,BdkVerificationError,BdkVerifier,mapVerifyFlags",
+    "check:artifacts": "node scripts/check-artifacts.mjs",
     "bench": "tsx bench/benchmark.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "bench:batch": "node --expose-gc --import tsx bench/batch-benchmark.ts",
+    "bench:crypto": "node --import tsx bench/crypto-benchmark.ts",
+    "bench:warmup": "node --import tsx bench/warmup-benchmark.ts",
+    "test:browser": "pnpm build && node browser/test.mjs",
+    "test:consumers": "pnpm build && node scripts/test-node-consumers.mjs && node scripts/test-browser-bundler.mjs && node browser/test.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "prepublishOnly": "pnpm build"
   },
-  "dependencies": {},
   "devDependencies": {
-    "@jest/globals": "^30.0.0",
+    "@bsv/sdk": "workspace:^",
+    "@jest/globals": "^30.4.1",
+    "@rspack/cli": "^2.1.5",
+    "@rspack/core": "^2.1.5",
     "@types/jest": "^30.0.0",
-    "@types/node": "^26.0.0",
-    "jest": "^30.0.0",
-    "ts-jest": "^29.2.0",
-    "ts-standard": "^12.0.2",
-    "tsx": "^4.22.4",
+    "@types/node": "^26.1.1",
+    "fast-check": "^4.9.0",
+    "jest": "^30.4.2",
+    "puppeteer-core": "^25.3.0",
+    "ts-jest": "^29.4.12",
+    "ts-loader": "^9.6.2",
+    "tsx": "^4.23.1",
     "typescript": "^6.0.3",
-    "@bsv/sdk": "workspace:^"
+    "vite": "^8.1.5",
+    "oxlint": "^1.75.0"
   },
   "peerDependencies": {
-    "@bsv/sdk": "^2.1.6"
+    "@bsv/sdk": "^2.1.8"
   },
   "peerDependenciesMeta": {
     "@bsv/sdk": {
       "optional": false
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "typesVersions": {
+    "*": {
+      "umd": [
+        "dist/umd.d.ts"
+      ],
+      "*": [
+        "dist/mod.d.ts"
+      ]
     }
   }
 }

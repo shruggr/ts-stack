@@ -84,7 +84,7 @@ server/
 
 ### Prerequisites
 
-- **Node.js 18+** (or 16+ should also work, but 18+ recommended for built-in Web Crypto).
+- **Node.js 24** and npm 11 (the supported runtime declared in `package.json`).
 - **npm** or **yarn** package manager.
 - **SQLite** (for quick local dev) or a local MySQL database if you prefer.
 
@@ -147,19 +147,70 @@ TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxx
 TWILIO_VERIFY_SERVICE_SID=VExxxxxxxxx
 
-# If using a local MySQL or other DB, for example:
-DB_CLIENT=pg
+# If using a local MySQL database:
+DB_CLIENT=mysql2
 DB_USER=mysql
 DB_PASS=password
 DB_NAME=wallet_auth
 DB_HOST=localhost
-DB_PORT=5432
+DB_PORT=3306
 
 # Other environment-specific config
 PORT=3000
+
+# Optional, explicit reverse-proxy hop count. Omit when directly reachable.
+TRUST_PROXY_HOPS=1
+
+# Public CORS is the default. For a closed caller set:
+# WAB_CORS_MODE=allowlist
+# WAB_CORS_ALLOWED_ORIGINS=https://wallet.example.com
+
+# Console OTP is permitted only in development/test and requires both values.
+# NODE_ENV=development
+# DEV_CONSOLE_AUTH_METHOD_ENABLED=true
 ```
 
 *(Note: The server already reads environment variables to figure out how to connect to the DB, Twilio, etc. Adjust as needed.)*
+
+All state-changing routes are rate-limited and return HTTP 429 with
+`ERR_RATE_LIMITED`. Defaults are 10 authentication attempts per 15 minutes,
+120 user operations per 15 minutes, 5 faucet requests per hour, 5 account
+deletion attempts per 15 minutes, and 10 share operations per 15 minutes.
+Override a policy with `<PREFIX>_MAX` and `<PREFIX>_WINDOW_MS`, where the
+prefix is `WAB_AUTH_RATE_LIMIT`, `WAB_USER_RATE_LIMIT`,
+`WAB_FAUCET_RATE_LIMIT`, `WAB_ACCOUNT_DELETION_RATE_LIMIT`, or
+`WAB_SHARE_RATE_LIMIT`. Invalid or unbounded values fail startup.
+
+Express ignores forwarding headers unless `TRUST_PROXY_HOPS` is explicitly set
+to a value from 0 through 10. Set it only to the number of trusted proxies in
+front of the service; never expose an instance configured for a proxy directly
+to untrusted clients.
+
+WAB is a public protocol service used by deployed wallet apps on many domains.
+It therefore enables wildcard CORS without cookie credentials by default.
+`WAB_CORS_MODE=allowlist` plus exact origins, or `disabled`, provides an
+operator opt-in restriction. Authentication and all endpoint rate limits apply
+in every mode. This API policy is independent of Content Security Policy:
+deploying applications should configure CSP for their own documents, while WAB
+uses authentication, authorization, validation, and rate limits to protect API
+operations.
+
+### Authentication and account-deletion invariants
+
+Phone identities use canonical E.164 form and cannot move between live user
+accounts. A previously linked identity may be attached to a new account only
+after its old account has been deleted; its faucet history is retained.
+Presentation keys and Shamir user hashes are exact 256-bit hexadecimal values.
+Stored Shamir shares are bounded and structurally validated before any database
+operation.
+
+Account deletion is a two-step proof-of-identity flow. The start response is
+identical for known and unknown identities to avoid account enumeration. Its
+bearer token has 256 bits of entropy; only a SHA-256 digest is persisted. The
+intent expires after ten minutes, is single-use, is rate-limited per external
+identity, and is bound to the authentication method, canonical identity, and
+specific live user. A valid OTP from another flow or account cannot authorize
+deletion.
 
 ### Running Locally
 
@@ -192,7 +243,7 @@ PORT=3000
 The WAB is **modular**: you can configure multiple ways for users to authenticate. Two example methods are:
 
 1. **Twilio Phone Verification** (SMS-based).
-2. **Persona / Jumio ID Verification** (3rd-party ID check).
+2. **Development console OTP** (explicit development/test opt-in only).
 
 ### Configuring Twilio Phone Verification
 
@@ -217,7 +268,9 @@ When a client sends a request to `/auth/start` with `methodType = "TwilioPhone"`
 
 ### Persona / Jumio ID Verification (Example)
 
-We also have a `PersonaAuthMethod` example. This is **mocked** for demonstration. If you want real ID verification, integrate with **Persona** or **Jumio** properly (webhooks, tokens, verifying session IDs, etc.).
+The repository contains a mocked `PersonaAuthMethod` example, but it is not
+registered or advertised by the server. It must not be treated as production
+identity verification without a complete provider integration and review.
 
 ### Adding More Methods
 
@@ -286,7 +339,7 @@ We provide a [GitHub Actions workflow](./.github/workflows/deploy.yaml) that aut
 
 ```bash
 NODE_ENV=production
-DB_CLIENT=pg
+DB_CLIENT=mysql2
 DB_CONNECTION_NAME=my-project:us-central1:wab-sql
 DB_USER=myuser
 DB_PASS=mysecret
@@ -309,7 +362,7 @@ gcloud run deploy wab-server-production \
   --allow-unauthenticated \
   --add-cloudsql-instances=my-project:us-central1:wab-sql \
   --set-env-vars=NODE_ENV=production \
-  --set-env-vars=DB_CLIENT=pg \
+  --set-env-vars=DB_CLIENT=mysql2 \
   --set-env-vars=DB_CONNECTION_NAME=my-project:us-central1:wab-sql \
   --set-env-vars=DB_USER=myuser \
   --set-env-vars=DB_PASS=mysecret \
@@ -371,4 +424,4 @@ To contribute:
 
 ## License
 
-This project is available under the [Open BSV License v4](./LICENSE.txt).
+This project is available under the [Open BSV License Version 6](./LICENSE.txt).

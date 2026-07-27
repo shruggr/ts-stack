@@ -41,7 +41,7 @@ import { asArray, asString } from '../utility/utilityHelpers.noBuffer'
 export class Services implements WalletServices {
   static readonly getStatusForTxidsBatchLimit = 20
 
-  static createDefaultOptions (chain: Chain): WalletServicesOptions {
+  static createDefaultOptions(chain: Chain): WalletServicesOptions {
     return createDefaultWalletServicesOptions(chain)
   }
 
@@ -63,11 +63,11 @@ export class Services implements WalletServices {
 
   chain: Chain
 
-  constructor (optionsOrChain: Chain | WalletServicesOptions) {
+  constructor(optionsOrChain: Chain | WalletServicesOptions) {
     this.chain = typeof optionsOrChain === 'string' ? optionsOrChain : optionsOrChain.chain
 
     if (this.chain === 'mock') {
-      throw new WERR_INVALID_PARAMETER('chain', '\'main\', \'test\', or \'ttn\'. Use MockServices for \'mock\' chain.')
+      throw new WERR_INVALID_PARAMETER('chain', "'main', 'test', 'ttn', or 'tstn'. Use MockServices for 'mock' chain.")
     }
 
     this.options = typeof optionsOrChain === 'string' ? Services.createDefaultOptions(this.chain) : optionsOrChain
@@ -84,6 +84,11 @@ export class Services implements WalletServices {
 
     const hasBitails = this.chain === 'main' || this.chain === 'test'
 
+    // tstn runs only Arcade + ChainTracks; it has no WhatsOnChain / block-explorer service, so
+    // WhatsOnChain is not registered as a provider on tstn. The WhatsOnChain-only lookups (raw
+    // tx, utxo status, txid status, script-hash history) therefore have no provider on tstn.
+    const hasWhatsOnChain = this.chain !== 'tstn'
+
     if (hasBitails) {
       this.bitails = new Bitails(this.chain, { apiKey: this.options.bitailsApiKey })
     }
@@ -95,16 +100,21 @@ export class Services implements WalletServices {
       // prettier-ignore
       this.getMerklePathServices.add({ name: 'Arcade', service: this.arcade.getMerklePath.bind(this.arcade) })
     }
-    // prettier-ignore
-    this.getMerklePathServices
-      .add({ name: 'WhatsOnChain', service: this.whatsonchain.getMerklePath.bind(this.whatsonchain) })
-    if (hasBitails && (this.bitails != null)) {
+    if (hasWhatsOnChain) {
+      // prettier-ignore
+      this.getMerklePathServices
+        .add({ name: 'WhatsOnChain', service: this.whatsonchain.getMerklePath.bind(this.whatsonchain) })
+    }
+    if (hasBitails && this.bitails != null) {
       this.getMerklePathServices.add({ name: 'Bitails', service: this.bitails.getMerklePath.bind(this.bitails) })
     }
 
-    // prettier-ignore
     this.getRawTxServices = new ServiceCollection<GetRawTxService>('getRawTx')
-      .add({ name: 'WhatsOnChain', service: this.whatsonchain.getRawTxResult.bind(this.whatsonchain) })
+    if (hasWhatsOnChain) {
+      // prettier-ignore
+      this.getRawTxServices
+        .add({ name: 'WhatsOnChain', service: this.whatsonchain.getRawTxResult.bind(this.whatsonchain) })
+    }
 
     this.postBeefServices = new ServiceCollection<PostBeefService>('postBeef')
     // Arcade is registered first so it is the primary broadcaster; ARC providers below
@@ -120,24 +130,35 @@ export class Services implements WalletServices {
     // prettier-ignore
     this.postBeefServices
       .add({ name: 'TaalArcBeef', service: this.arcTaal.postBeef.bind(this.arcTaal) })
-    if (hasBitails && (this.bitails != null)) {
+    if (hasBitails && this.bitails != null) {
       this.postBeefServices.add({ name: 'Bitails', service: this.bitails.postBeef.bind(this.bitails) })
     }
-    // prettier-ignore
-    this.postBeefServices
-      .add({ name: 'WhatsOnChain', service: this.whatsonchain.postBeef.bind(this.whatsonchain) })
+    if (hasWhatsOnChain) {
+      // prettier-ignore
+      this.postBeefServices
+        .add({ name: 'WhatsOnChain', service: this.whatsonchain.postBeef.bind(this.whatsonchain) })
+    }
 
-    // prettier-ignore
     this.getUtxoStatusServices = new ServiceCollection<GetUtxoStatusService>('getUtxoStatus')
-      .add({ name: 'WhatsOnChain', service: this.whatsonchain.getUtxoStatus.bind(this.whatsonchain) })
+    if (hasWhatsOnChain) {
+      // prettier-ignore
+      this.getUtxoStatusServices
+        .add({ name: 'WhatsOnChain', service: this.whatsonchain.getUtxoStatus.bind(this.whatsonchain) })
+    }
 
-    // prettier-ignore
     this.getStatusForTxidsServices = new ServiceCollection<GetStatusForTxidsService>('getStatusForTxids')
-      .add({ name: 'WhatsOnChain', service: this.whatsonchain.getStatusForTxids.bind(this.whatsonchain) })
+    if (hasWhatsOnChain) {
+      // prettier-ignore
+      this.getStatusForTxidsServices
+        .add({ name: 'WhatsOnChain', service: this.whatsonchain.getStatusForTxids.bind(this.whatsonchain) })
+    }
 
-    // prettier-ignore
     this.getScriptHashHistoryServices = new ServiceCollection<GetScriptHashHistoryService>('getScriptHashHistory')
-      .add({ name: 'WhatsOnChain', service: this.whatsonchain.getScriptHashHistory.bind(this.whatsonchain) })
+    if (hasWhatsOnChain) {
+      // prettier-ignore
+      this.getScriptHashHistoryServices
+        .add({ name: 'WhatsOnChain', service: this.whatsonchain.getScriptHashHistory.bind(this.whatsonchain) })
+    }
 
     // prettier-ignore
     this.updateFiatExchangeRateServices = new ServiceCollection<UpdateFiatExchangeRateService>('updateFiatExchangeRate')
@@ -153,7 +174,7 @@ export class Services implements WalletServices {
     }
   }
 
-  getServicesCallHistory (reset?: boolean): ServicesCallHistory {
+  getServicesCallHistory(reset?: boolean): ServicesCallHistory {
     return {
       version: 2,
       getMerklePath: this.getMerklePathServices.getServiceCallHistory(reset),
@@ -166,12 +187,14 @@ export class Services implements WalletServices {
     }
   }
 
-  async getChainTracker (): Promise<ChainTracker> {
-    if (this.options.chaintracks == null) { throw new WERR_INVALID_PARAMETER('options.chaintracks', 'valid to enable \'getChainTracker\' service.') }
+  async getChainTracker(): Promise<ChainTracker> {
+    if (this.options.chaintracks == null) {
+      throw new WERR_INVALID_PARAMETER('options.chaintracks', "valid to enable 'getChainTracker' service.")
+    }
     return new ChaintracksChainTracker(this.chain, this.options.chaintracks)
   }
 
-  async getBsvExchangeRate (): Promise<number> {
+  async getBsvExchangeRate(): Promise<number> {
     this.options.bsvExchangeRate = await this.whatsonchain.updateBsvExchangeRate(
       this.options.bsvExchangeRate,
       this.options.bsvUpdateMsecs
@@ -179,7 +202,7 @@ export class Services implements WalletServices {
     return this.options.bsvExchangeRate.rate
   }
 
-  async getFiatExchangeRate (currency: FiatCurrencyCode, base?: FiatCurrencyCode): Promise<number> {
+  async getFiatExchangeRate(currency: FiatCurrencyCode, base?: FiatCurrencyCode): Promise<number> {
     base ||= 'USD'
     if (currency === base) return 1
 
@@ -198,7 +221,7 @@ export class Services implements WalletServices {
     return c / b
   }
 
-  async getFiatExchangeRates (targetCurrencies: FiatCurrencyCode[]): Promise<FiatExchangeRates> {
+  async getFiatExchangeRates(targetCurrencies: FiatCurrencyCode[]): Promise<FiatExchangeRates> {
     await this.updateFiatExchangeRates(targetCurrencies, this.options.fiatUpdateMsecs)
 
     const stored = this.options.fiatExchangeRates
@@ -218,23 +241,23 @@ export class Services implements WalletServices {
     }
   }
 
-  get getProofsCount (): number {
+  get getProofsCount(): number {
     return this.getMerklePathServices.count
   }
 
-  get getRawTxsCount (): number {
+  get getRawTxsCount(): number {
     return this.getRawTxServices.count
   }
 
-  get postBeefServicesCount (): number {
+  get postBeefServicesCount(): number {
     return this.postBeefServices.count
   }
 
-  get getUtxoStatsCount (): number {
+  get getUtxoStatsCount(): number {
     return this.getUtxoStatusServices.count
   }
 
-  async getStatusForTxids (txids: string[], useNext?: boolean): Promise<GetStatusForTxidsResult> {
+  async getStatusForTxids(txids: string[], useNext?: boolean): Promise<GetStatusForTxidsResult> {
     const services = this.getStatusForTxidsServices
     if (useNext === true) services.next()
 
@@ -266,7 +289,7 @@ export class Services implements WalletServices {
     return r0
   }
 
-  private async getStatusForTxidsBatched (
+  private async getStatusForTxidsBatched(
     stc: ServiceToCall<GetStatusForTxidsService>,
     txids: string[]
   ): Promise<GetStatusForTxidsResult> {
@@ -279,7 +302,7 @@ export class Services implements WalletServices {
       if (r.status !== 'success') {
         return r
       }
-      if ((error == null) && (r.error != null)) error = r.error
+      if (error == null && r.error != null) error = r.error
       results.push(...r.results)
     }
 
@@ -295,12 +318,12 @@ export class Services implements WalletServices {
    * @param script Output script to be hashed for `getUtxoStatus` default `outputFormat`
    * @returns script hash in 'hashLE' format, which is the default.
    */
-  hashOutputScript (script: string): string {
+  hashOutputScript(script: string): string {
     const hash = Utils.toHex(sha256Hash(Utils.toArray(script, 'hex')))
     return hash
   }
 
-  async isUtxo (output: TableOutput): Promise<boolean> {
+  async isUtxo(output: TableOutput): Promise<boolean> {
     if (output.lockingScript == null) {
       throw new WERR_INVALID_PARAMETER('output.lockingScript', 'validated by storage provider validateOutputScript.')
     }
@@ -309,7 +332,7 @@ export class Services implements WalletServices {
     return or.isUtxo === true
   }
 
-  async getUtxoStatus (
+  async getUtxoStatus(
     output: string,
     outputFormat?: GetUtxoStatusOutputFormat,
     outpoint?: string,
@@ -328,7 +351,7 @@ export class Services implements WalletServices {
 
     logger?.group('services getUtxoStatus')
     for (let retry = 0; retry < 2; retry++) {
-      r0 = await this.tryUtxoStatusProviders(services, output, outputFormat, outpoint, logger) ?? r0
+      r0 = (await this.tryUtxoStatusProviders(services, output, outputFormat, outpoint, logger)) ?? r0
       if (r0.status === 'success') break
       await wait(2000)
     }
@@ -336,7 +359,7 @@ export class Services implements WalletServices {
     return r0
   }
 
-  private async tryUtxoStatusProviders (
+  private async tryUtxoStatusProviders(
     services: ServiceCollection<GetUtxoStatusService>,
     output: string,
     outputFormat: GetUtxoStatusOutputFormat | undefined,
@@ -362,7 +385,7 @@ export class Services implements WalletServices {
     return undefined
   }
 
-  async getScriptHashHistory (
+  async getScriptHashHistory(
     hash: string,
     useNext?: boolean,
     logger?: WalletLoggerInterface
@@ -421,7 +444,7 @@ export class Services implements WalletServices {
    * @param chain
    * @returns
    */
-  async postBeef (beef: Beef, txids: string[], logger?: WalletLoggerInterface): Promise<PostBeefResult[]> {
+  async postBeef(beef: Beef, txids: string[], logger?: WalletLoggerInterface): Promise<PostBeefResult[]> {
     let rs: PostBeefResult[] = []
     const services = this.postBeefServices
     const stcs = services.allServicesToCall
@@ -453,7 +476,7 @@ export class Services implements WalletServices {
     logger?.groupEnd()
     return rs
 
-    async function callService (stc: ServiceToCall<PostBeefService>, timeoutMs?: number): Promise<PostBeefResult> {
+    async function callService(stc: ServiceToCall<PostBeefService>, timeoutMs?: number): Promise<PostBeefResult> {
       const callPromise = stc.service(beef, txids)
       let r: PostBeefResult
       if (timeoutMs == null || timeoutMs <= 0) {
@@ -482,7 +505,7 @@ export class Services implements WalletServices {
       return r
     }
 
-    function makeServiceTimeoutResult (providerName: string, txids: string[], timeoutMs: number): PostBeefResult {
+    function makeServiceTimeoutResult(providerName: string, txids: string[], timeoutMs: number): PostBeefResult {
       return {
         name: providerName,
         status: 'error',
@@ -497,7 +520,7 @@ export class Services implements WalletServices {
     }
   }
 
-  private getPostBeefSoftTimeoutMs (beef: Beef): number {
+  private getPostBeefSoftTimeoutMs(beef: Beef): number {
     const baseMs = Math.max(0, this.postBeefUntilSuccessSoftTimeoutMs)
     const perKbMs = Math.max(0, this.postBeefUntilSuccessSoftTimeoutPerKbMs)
     const maxMs = Math.max(baseMs, this.postBeefUntilSuccessSoftTimeoutMaxMs)
@@ -508,7 +531,7 @@ export class Services implements WalletServices {
     return Math.min(maxMs, baseMs + extraMs)
   }
 
-  async getRawTx (txid: string, useNext?: boolean): Promise<GetRawTxResult> {
+  async getRawTx(txid: string, useNext?: boolean): Promise<GetRawTxResult> {
     const services = this.getRawTxServices
     if (useNext === true) services.next()
 
@@ -527,7 +550,7 @@ export class Services implements WalletServices {
     return r0
   }
 
-  private applyRawTxResult (
+  private applyRawTxResult(
     r0: GetRawTxResult,
     txid: string,
     r: GetRawTxResult,
@@ -551,12 +574,14 @@ export class Services implements WalletServices {
     else services.addServiceCallSuccess(stc, 'not found')
 
     // If we have an error and didn't before, capture it.
-    if ((r.error != null) && (r0.error == null) && (r0.rawTx == null)) r0.error = r.error
+    if (r.error != null && r0.error == null && r0.rawTx == null) r0.error = r.error
     return false
   }
 
   async invokeChaintracksWithRetry<R>(method: () => Promise<R>): Promise<R> {
-    if (this.options.chaintracks == null) { throw new WERR_INVALID_PARAMETER('options.chaintracks', 'valid for this service operation.') }
+    if (this.options.chaintracks == null) {
+      throw new WERR_INVALID_PARAMETER('options.chaintracks', 'valid for this service operation.')
+    }
     for (let retry = 0; retry < 3; retry++) {
       try {
         const r: R = await method()
@@ -569,17 +594,18 @@ export class Services implements WalletServices {
     throw new WERR_INVALID_OPERATION('hashToHeader service unavailable')
   }
 
-  async getHeaderForHeight (height: number): Promise<number[]> {
+  async getHeaderForHeight(height: number): Promise<number[]> {
     const method = async (): Promise<number[]> => {
       const chaintracks = this.options.chaintracks as NonNullable<typeof this.options.chaintracks>
       const header = await chaintracks.findHeaderForHeight(height)
-      if (header == null) throw new WERR_INVALID_PARAMETER('hash', `valid height '${height}' on mined chain ${this.chain}`)
+      if (header == null)
+        throw new WERR_INVALID_PARAMETER('hash', `valid height '${height}' on mined chain ${this.chain}`)
       return toBinaryBaseBlockHeader(header)
     }
     return await this.invokeChaintracksWithRetry(method)
   }
 
-  async getHeight (): Promise<number> {
+  async getHeight(): Promise<number> {
     const method = async (): Promise<number> => {
       const chaintracks = this.options.chaintracks as NonNullable<typeof this.options.chaintracks>
       return await chaintracks.currentHeight()
@@ -587,7 +613,7 @@ export class Services implements WalletServices {
     return await this.invokeChaintracksWithRetry(method)
   }
 
-  async hashToHeader (hash: string): Promise<BlockHeader> {
+  async hashToHeader(hash: string): Promise<BlockHeader> {
     const method = async (): Promise<BlockHeader | undefined> => {
       const chaintracks = this.options.chaintracks as NonNullable<typeof this.options.chaintracks>
       const header = await chaintracks.findHeaderForBlockHash(hash)
@@ -595,11 +621,12 @@ export class Services implements WalletServices {
     }
     let header = await this.invokeChaintracksWithRetry(method)
     header ??= await this.whatsonchain.getBlockHeaderByHash(hash)
-    if (header == null) throw new WERR_INVALID_PARAMETER('hash', `valid blockhash '${hash}' on mined chain ${this.chain}`)
+    if (header == null)
+      throw new WERR_INVALID_PARAMETER('hash', `valid blockhash '${hash}' on mined chain ${this.chain}`)
     return header
   }
 
-  async getMerklePath (txid: string, useNext?: boolean, logger?: WalletLoggerInterface): Promise<GetMerklePathResult> {
+  async getMerklePath(txid: string, useNext?: boolean, logger?: WalletLoggerInterface): Promise<GetMerklePathResult> {
     const services = this.getMerklePathServices
     if (useNext === true) services.next()
 
@@ -610,7 +637,10 @@ export class Services implements WalletServices {
       const stc = services.serviceToCall
       try {
         const r = await stc.service(txid, this)
-        if (r.notes != null) { r0.notes = r0.notes ?? []; r0.notes.push(...r.notes) }
+        if (r.notes != null) {
+          r0.notes = r0.notes ?? []
+          r0.notes.push(...r.notes)
+        }
         r0.name ??= r.name
         if (r.merklePath == null) {
           logger?.log(`${stc.providerName} no merklePath`)
@@ -628,7 +658,7 @@ export class Services implements WalletServices {
         if (r.error != null) services.addServiceCallError(stc, r.error)
         else services.addServiceCallFailure(stc)
 
-        if ((r.error != null) && (r0.error == null)) {
+        if (r.error != null && r0.error == null) {
           // If we have an error and didn't before...
           r0.error = r.error
         }
@@ -641,7 +671,7 @@ export class Services implements WalletServices {
     return r0
   }
 
-  async updateFiatExchangeRates (
+  async updateFiatExchangeRates(
     targetCurrencies: FiatCurrencyCode[],
     updateMsecs?: number
   ): Promise<FiatExchangeRates> {
@@ -654,7 +684,12 @@ export class Services implements WalletServices {
     const toFetch = this.collectStaleCurrencies(targetCurrencies, storedRates, stored, freshnessDate)
 
     if (toFetch.length === 0) {
-      this.options.fiatExchangeRates = { timestamp: stored.timestamp, base: stored.base, rates: storedRates, rateTimestamps: stored.rateTimestamps }
+      this.options.fiatExchangeRates = {
+        timestamp: stored.timestamp,
+        base: stored.base,
+        rates: storedRates,
+        rateTimestamps: stored.rateTimestamps
+      }
       return this.options.fiatExchangeRates
     }
 
@@ -669,7 +704,7 @@ export class Services implements WalletServices {
     return this.options.fiatExchangeRates
   }
 
-  private collectStaleCurrencies (
+  private collectStaleCurrencies(
     targetCurrencies: FiatCurrencyCode[],
     storedRates: Record<string, number>,
     stored: FiatExchangeRates,
@@ -689,7 +724,7 @@ export class Services implements WalletServices {
     return toFetch
   }
 
-  private async fetchFiatRates (toFetch: FiatCurrencyCode[]): Promise<FiatExchangeRates | undefined> {
+  private async fetchFiatRates(toFetch: FiatCurrencyCode[]): Promise<FiatExchangeRates | undefined> {
     const services = this.updateFiatExchangeRateServices.clone()
     for (let tries = 0; tries < services.count; tries++) {
       const stc = services.serviceToCall
@@ -708,15 +743,15 @@ export class Services implements WalletServices {
     return undefined
   }
 
-  private mergeFiatRates (
+  private mergeFiatRates(
     stored: FiatExchangeRates,
     storedRates: Record<string, number>,
     fetched: FiatExchangeRates
   ): FiatExchangeRates {
     const nextRates: Record<string, number> = { ...storedRates }
-    const nextTimestamps: Record<string, Date> = { ...(stored.rateTimestamps ?? {}) }
+    const nextTimestamps: Record<string, Date> = { ...stored.rateTimestamps }
 
-    for (const c of (fetched.rates != null ? Object.keys(fetched.rates) : [])) {
+    for (const c of fetched.rates != null ? Object.keys(fetched.rates) : []) {
       const v = fetched.rates?.[c]
       if (typeof v === 'number') {
         nextRates[c] = v
@@ -724,13 +759,14 @@ export class Services implements WalletServices {
       }
     }
 
-    const storedMs = stored.timestamp instanceof Date ? stored.timestamp.getTime() : new Date(stored.timestamp).getTime()
+    const storedMs =
+      stored.timestamp instanceof Date ? stored.timestamp.getTime() : new Date(stored.timestamp).getTime()
     const nextTimestamp = new Date(Math.max(storedMs, fetched.timestamp.getTime()))
 
     return { timestamp: nextTimestamp, base: stored.base, rates: nextRates, rateTimestamps: nextTimestamps }
   }
 
-  async nLockTimeIsFinal (tx: string | number[] | BsvTransaction | number): Promise<boolean> {
+  async nLockTimeIsFinal(tx: string | number[] | BsvTransaction | number): Promise<boolean> {
     const MAXINT = 0xffffffff
     const BLOCK_LIMIT = 500000000
 
@@ -763,13 +799,13 @@ export class Services implements WalletServices {
     return nLockTime < height
   }
 
-  async getBeefForTxid (txid: string): Promise<Beef> {
+  async getBeefForTxid(txid: string): Promise<Beef> {
     const beef = await getBeefForTxid(this, txid)
     return beef
   }
 }
 
-export function validateScriptHash (output: string, outputFormat?: GetUtxoStatusOutputFormat): string {
+export function validateScriptHash(output: string, outputFormat?: GetUtxoStatusOutputFormat): string {
   let b = asArray(output)
   if (outputFormat == null) {
     if (b.length === 32) outputFormat = 'hashLE'
@@ -798,7 +834,7 @@ export function validateScriptHash (output: string, outputFormat?: GetUtxoStatus
  * @returns 80 byte array
  * @publicbody
  */
-export function toBinaryBaseBlockHeader (header: BaseBlockHeader): number[] {
+export function toBinaryBaseBlockHeader(header: BaseBlockHeader): number[] {
   const writer = new Utils.Writer()
   writer.writeUInt32LE(header.version)
   writer.writeReverse(asArray(header.previousHash))

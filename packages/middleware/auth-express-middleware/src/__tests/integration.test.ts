@@ -27,7 +27,6 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
     server = startServer(3000) // Returns un-listened server
     await new Promise<void>((resolve, reject) => {
       server.once('listening', () => {
-        console.log('Test server is running on http://localhost:3000')
         resolve()
       })
       server.once('error', reject)
@@ -39,7 +38,6 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
     if (server && server.listening) {
       await new Promise<void>((resolve, reject) => {
         server.once('close', () => {
-          console.log('Test server stopped')
           resolve()
         })
         server.once('error', reject)
@@ -58,54 +56,43 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
   test('Test 1: Simple POST request with JSON', async () => {
     const walletWithRequests = new MockWallet(privKey)
     const authFetch = new AuthFetch(walletWithRequests)
-    const result = await authFetch.fetch(
-      'http://localhost:3000/other-endpoint',
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({ message: 'Hello from JSON!' })
-      }
-    )
+    const result = await authFetch.fetch('http://localhost:3000/other-endpoint', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ message: 'Hello from JSON!' })
+    })
     expect(result.status).toBe(200)
     const jsonResponse = await result.json()
-    console.log(jsonResponse)
     expect(jsonResponse).toBeDefined()
   })
   test('Test 1b: Simple POST request with JSON resulting in 500 error code', async () => {
     const walletWithRequests = new MockWallet(privKey)
     const authFetch = new AuthFetch(walletWithRequests)
-    const result = await authFetch.fetch(
-      'http://localhost:3000/error-500',
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({ message: 'Hello from JSON!' })
-      }
-    )
+    const result = await authFetch.fetch('http://localhost:3000/error-500', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ message: 'Hello from JSON!' })
+    })
     expect(result.status).toBe(500)
     const jsonResponse = await result.json()
-    console.log(jsonResponse)
     expect(jsonResponse).toHaveProperty('code', 'ERR_BAD_THING')
   })
 
   test('Test 2: POST request with URL-encoded data', async () => {
     const walletWithRequests = new CompletedProtoWallet(privKey)
     const authFetch = new AuthFetch(walletWithRequests)
-    const result = await authFetch.fetch(
-      'http://localhost:3000/other-endpoint',
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/x-www-form-urlencoded',
-          'x-bsv-test': 'this is a test header'
-        },
-        body: new URLSearchParams({ message: 'hello!', type: 'form-data' }).toString()
-      }
-    )
+    const result = await authFetch.fetch('http://localhost:3000/other-endpoint', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'x-bsv-test': 'this is a test header'
+      },
+      body: new URLSearchParams({ message: 'hello!', type: 'form-data' }).toString()
+    })
     expect(result.status).toBe(200)
     const textResponse = await result.text()
     expect(textResponse).toBeDefined()
@@ -114,17 +101,14 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
   test('Test 3: POST request with plain text', async () => {
     const walletWithRequests = new CompletedProtoWallet(privKey)
     const authFetch = new AuthFetch(walletWithRequests)
-    const result = await authFetch.fetch(
-      'http://localhost:3000/other-endpoint',
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'text/plain',
-          'x-bsv-test': 'this is a test header'
-        },
-        body: 'Hello, this is a plain text message!'
-      }
-    )
+    const result = await authFetch.fetch('http://localhost:3000/other-endpoint', {
+      method: 'POST',
+      headers: {
+        'content-type': 'text/plain',
+        'x-bsv-test': 'this is a test header'
+      },
+      body: 'Hello, this is a plain text message!'
+    })
     expect(result.status).toBe(200)
     const textResponse = await result.text()
     expect(textResponse).toBeDefined()
@@ -133,17 +117,14 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
   test('Test 4: POST request with binary data', async () => {
     const walletWithRequests = new CompletedProtoWallet(privKey)
     const authFetch = new AuthFetch(walletWithRequests)
-    const result = await authFetch.fetch(
-      'http://localhost:3000/other-endpoint',
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/octet-stream',
-          'x-bsv-test': 'this is a test header'
-        },
-        body: Utils.toArray('Hello from binary!')
-      }
-    )
+    const result = await authFetch.fetch('http://localhost:3000/other-endpoint', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-bsv-test': 'this is a test header'
+      },
+      body: Utils.toArray('Hello from binary!')
+    })
     expect(result.status).toBe(200)
     const textResponse = await result.text()
     expect(textResponse).toBeDefined()
@@ -176,17 +157,14 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
   test('Test 7: PUT request with JSON', async () => {
     const walletWithRequests = new CompletedProtoWallet(privKey)
     const authFetch = new AuthFetch(walletWithRequests)
-    const result = await authFetch.fetch(
-      'http://localhost:3000/put-endpoint',
-      {
-        method: 'PUT',
-        headers: {
-          'content-type': 'application/json',
-          'x-bsv-test': 'this is a test header'
-        },
-        body: JSON.stringify({ key: 'value', action: 'update' })
-      }
-    )
+    const result = await authFetch.fetch('http://localhost:3000/put-endpoint', {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        'x-bsv-test': 'this is a test header'
+      },
+      body: JSON.stringify({ key: 'value', action: 'update' })
+    })
     expect(result.status).toBe(200)
     const textResponse = await result.text()
     expect(textResponse).toBeDefined()
@@ -195,15 +173,12 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
   test('Test 8: DELETE request', async () => {
     const walletWithRequests = new CompletedProtoWallet(privKey)
     const authFetch = new AuthFetch(walletWithRequests)
-    const result = await authFetch.fetch(
-      'http://localhost:3000/delete-endpoint',
-      {
-        method: 'DELETE',
-        headers: {
-          'x-bsv-test': 'this is a test header'
-        }
+    const result = await authFetch.fetch('http://localhost:3000/delete-endpoint', {
+      method: 'DELETE',
+      headers: {
+        'x-bsv-test': 'this is a test header'
       }
-    )
+    })
     expect(result.status).toBe(200)
     const textResponse = await result.text()
     expect(textResponse).toBeDefined()
@@ -269,38 +244,30 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
   test('Edge Case B: application json content with undefined body', async () => {
     const walletWithRequests = new MockWallet(privKey)
     const authFetch = new AuthFetch(walletWithRequests)
-    const result = await authFetch.fetch(
-      'http://localhost:3000/other-endpoint',
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json'
-        },
-        body: undefined
-      }
-    )
+    const result = await authFetch.fetch('http://localhost:3000/other-endpoint', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: undefined
+    })
     expect(result.status).toBe(200)
     const jsonResponse = await result.json()
-    console.log(jsonResponse)
     expect(jsonResponse).toBeDefined()
   })
 
   test('Edge Case C: application json content with body of type object', async () => {
     const walletWithRequests = new MockWallet(privKey)
     const authFetch = new AuthFetch(walletWithRequests)
-    const result = await authFetch.fetch(
-      'http://localhost:3000/other-endpoint',
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json'
-        },
-        body: {}
-      }
-    )
+    const result = await authFetch.fetch('http://localhost:3000/other-endpoint', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: {}
+    })
     expect(result.status).toBe(200)
     const jsonResponse = await result.json()
-    console.log(jsonResponse)
     expect(jsonResponse).toBeDefined()
   })
 
@@ -317,13 +284,11 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
     })
     expect(resp1.status).toBe(200)
     const data1 = await resp1.json()
-    console.log('Data from first AuthFetch instance (before server restart):', data1)
     expect(data1).toBeDefined()
 
     // Close the server and wait for it to shut down.
     await new Promise<void>((resolve, reject) => {
       server.once('close', () => {
-        console.log('Server closed mid-test')
         resolve()
       })
       server.once('error', reject)
@@ -337,17 +302,16 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
     server = startServer(3000)
     await new Promise<void>((resolve, reject) => {
       server.once('listening', () => {
-        console.log('Server restarted for second half of the test...')
         resolve()
       })
-      server.once('error', (err) => {
+      server.once('error', err => {
         reject(err)
       })
       server.listen(3000) // Critical fix: Call listen after listeners
     })
 
     // Add a short delay to ensure the server is fully ready.
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await new Promise(resolve => setTimeout(resolve, 200))
 
     // Create a fresh AuthFetch instance using a new wallet instance (same identity key).
     const wallet2 = new MockWallet(privKey)
@@ -358,26 +322,21 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
     })
     expect(resp2.status).toBe(200)
     const data2 = await resp2.json()
-    console.log('Data from second AuthFetch instance (after server restart):', data2)
     expect(data2).toBeDefined()
   })
 
   test('Test 13: POST request with JSON header containing charset injection', async () => {
     const walletWithRequests = new CompletedProtoWallet(privKey)
     const authFetch = new AuthFetch(walletWithRequests)
-    const result = await authFetch.fetch(
-      'http://localhost:3000/other-endpoint',
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json; charset=utf-8'
-        },
-        body: JSON.stringify({ message: 'Testing charset injection normalization!' })
-      }
-    )
+    const result = await authFetch.fetch('http://localhost:3000/other-endpoint', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json; charset=utf-8'
+      },
+      body: JSON.stringify({ message: 'Testing charset injection normalization!' })
+    })
     expect(result.status).toBe(200)
     const jsonResponse = await result.json()
-    console.log(jsonResponse)
     expect(jsonResponse).toBeDefined()
   })
 
@@ -393,7 +352,9 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
     expect(firstResponse.status).toBe(200)
 
     // 2. Clear server-side sessions (simulates server restart / scaling event)
-    const clearResponse = await fetch('http://localhost:3000/__clear-auth-sessions', { method: 'POST' })
+    const clearResponse = await fetch('http://localhost:3000/__clear-auth-sessions', {
+      method: 'POST'
+    })
     expect(clearResponse.status).toBe(200)
 
     // 3. Second request should recover automatically (re-handshake) instead of hanging
@@ -404,7 +365,7 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
 
     const outcome = await Promise.race([
       secondRequestPromise
-        .then((res) => ({ tag: 'resolved' as const, response: res }))
+        .then(res => ({ tag: 'resolved' as const, response: res }))
         .catch((error: unknown) => {
           if (error instanceof Error) return { tag: 'rejected' as const, message: error.message }
           return { tag: 'rejected' as const, message: String(error) }
@@ -438,7 +399,9 @@ describe('AuthFetch and AuthExpress Integration Tests', () => {
     expect(r1.status).toBe(200)
 
     // Clear sessions
-    const clearResponse = await fetch('http://localhost:3000/__clear-auth-sessions', { method: 'POST' })
+    const clearResponse = await fetch('http://localhost:3000/__clear-auth-sessions', {
+      method: 'POST'
+    })
     expect(clearResponse.status).toBe(200)
 
     // Second request — should recover via re-handshake

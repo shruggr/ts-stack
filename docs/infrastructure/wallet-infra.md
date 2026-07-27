@@ -2,9 +2,9 @@
 id: infra-wallet-infra
 title: "Wallet Infrastructure Services"
 kind: infra
-version: "2.0.4"
-last_updated: "2026-06-27"
-last_verified: "2026-06-27"
+version: "2.0.13"
+last_updated: "2026-07-25"
+last_verified: "2026-07-25"
 review_cadence_days: 30
 status: stable
 tags: [wallet, utxo-storage, json-rpc, brc-100, storage-server]
@@ -41,6 +41,8 @@ Clients connect with identity-based auth headers, manage UTXOs, baskets, labels,
 | Method | Path | Purpose |
 |--------|------|---------|
 | POST | / | JSON-RPC 2.0 endpoint (all wallet operations) |
+| PUT | /action-batch/:batchId/blob/:digest | Authenticated bounded binary blob upload |
+| GET | /, /robots.txt | Public service metadata |
 
 JSON-RPC methods: walletUtxoStorage_getHeight, walletUtxoStorage_listOutputs, walletUtxoStorage_insertOutput, walletUtxoStorage_updateOutput, walletUtxoStorage_listBaskets, walletUtxoStorage_createBasket, walletUtxoStorage_getBasket, walletUtxoStorage_listLabels, walletUtxoStorage_upsertLabel, walletUtxoStorage_dropLabels, walletUtxoStorage_listCertificates, walletUtxoStorage_insertCertificate (see @bsv/wallet-toolbox docs for full list).
 
@@ -55,13 +57,28 @@ None; HTTP JSON-RPC only.
 | NODE_ENV | No | `development` or `production` |
 | HTTP_PORT | No | Express server port (default: 8081, use 8081 if nginx enabled on 8080) |
 | ENABLE_NGINX | No | Set to `'true'` to start nginx reverse proxy on port 8080 (default: false) |
-| BSV_NETWORK | No | Target blockchain network (`main`, `test`, `ttn`, or `mock`) |
+| BSV_NETWORK | No | Target blockchain network (`main`, `test`, `ttn`, `tstn`, or `mock`) |
 | SERVER_PRIVATE_KEY | Yes | 256-bit hex private key for server identity |
 | KNEX_DB_CONNECTION | Yes | Knex database connection JSON string (e.g., `{"port":3306,"host":"mysql","user":"root","password":"rootPass","database":"wallet_storage"}`) |
 | COMMISSION_FEE | No | Optional commission fee in satoshis per request (default: 0) |
 | COMMISSION_PUBLIC_KEY | No | Public key to receive commission payments (if COMMISSION_FEE > 0) |
 | FEE_MODEL | No | Fee calculation model as JSON (default: `{"model":"sat/kb","value":1}`) |
 | TAAL_API_KEY | No | API key used by the default Arc/Taal service configuration (optional) |
+| TSTN_ARCADE_URL | tstn only | Private Arcade (broadcast + merkle proofs) endpoint for the `tstn` network. Not public; supplied per-deployment. Also used as the default ChainTracks host. |
+| TSTN_CHAINTRACKS_URL | No | Private ChainTracks endpoint for `tstn`. Defaults to `${TSTN_ARCADE_URL}/chaintracks/v1` when omitted. |
+| WALLET_STORAGE_CORS_MODE | No | `public` (default), `allowlist`, or `disabled` |
+| WALLET_STORAGE_CORS_ALLOWED_ORIGINS | No | Exact comma-separated origins in allowlist mode |
+| WALLET_STORAGE_JSON_MAX_BODY_BYTES | No | JSON-RPC body ceiling (default 31457280) |
+| WALLET_STORAGE_BINARY_MAX_BODY_BYTES | No | Blob body ceiling (default 8388608) |
+
+See [Public Service Edge Security](service-edge-security.md#wallet-storageserver-and-adminserver)
+for the authentication, rate, timeout, logging, CORS/CSP, admin, and nginx
+contracts.
+
+> `tstn` (Teranode Scaling Test Net) runs only Arcade and ChainTracks — it has no
+> WhatsOnChain / block-explorer service. Its endpoints are private and are read from the
+> environment at runtime rather than hardcoded, so `TSTN_ARCADE_URL` (and optionally
+> `TSTN_CHAINTRACKS_URL`) must be set whenever `BSV_NETWORK=tstn`.
 
 The reference `infra/wallet-infra` entrypoint currently wires only the default
 wallet-toolbox `Services.createDefaultOptions(chain)` path, plus `TAAL_API_KEY`
@@ -91,7 +108,7 @@ npm start
 ## Deploy to production
 
 ```bash
-# Multi-stage Docker build: Node 22 alpine → production
+# Multi-stage Docker build: pinned Node 24 alpine → production
 docker build -t wallet-infra:latest .
 
 # Run with MySQL backend
@@ -118,7 +135,7 @@ docker run -d \
 docker compose up -d
 ```
 
-Dockerfile uses multi-stage build (Node 22 builder → production). Optional nginx.conf reverse proxy (if ENABLE_NGINX=true) on 8080 proxying to app on 8081.
+Dockerfile uses a digest-pinned Node 24 multi-stage build. Optional nginx.conf reverse proxy (if ENABLE_NGINX=true) on 8080 proxying to app on 8081.
 
 ## Migrations
 
@@ -200,5 +217,5 @@ upstream app port (`HTTP_PORT`, default `8081`).
 
 ## Source
 
-- [GitHub](https://github.com/bsv-blockchain/wallet-infra)
+- [GitHub](https://github.com/bsv-blockchain/ts-stack/tree/main/infra/wallet-infra)
 - [npm package](https://npmjs.com/package/@bsv/wallet-toolbox)

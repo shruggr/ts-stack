@@ -6,32 +6,81 @@ on:
   pull_request:
     branches: [main]
 
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-and-test:
+  repository-health:
+    name: Repository health contract
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Use Node.js 24.x
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.x
+
+      - name: Test repository health controls
+        run: node --test scripts/*.test.mjs
+
+      - name: Enforce test, manual-suite, and conformance skip governance
+        run: node scripts/test-governance.mjs
+
+      - name: Verify synchronized service security policies
+        run: |
+          node scripts/sync-service-rate-limit-policy.mjs --check
+          node scripts/sync-service-edge-policy.mjs --check
+
+      - name: Enforce inventory, exception, baseline, and contract ratchets
+        run: >-
+          node scripts/repository-health.mjs
+          --format text
+          --summary-file "$GITHUB_STEP_SUMMARY"
+
+  prepare:
+    name: Build, lint, and policy
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: [24.x]
-
+    outputs:
+      filter: ${{ steps.scope.outputs.filter }}
+      standard-packages: ${{ steps.scope.outputs.standard-packages }}
+      coverage-other-packages: ${{ steps.scope.outputs.coverage-other-packages }}
+      mutation-targets: ${{ steps.scope.outputs.mutation-targets }}
+      sdk: ${{ steps.scope.outputs.sdk }}
+      did: ${{ steps.scope.outputs.did }}
+      wallet: ${{ steps.scope.outputs.wallet }}
+      wallet_client: ${{ steps.scope.outputs.wallet_client }}
+      wallet_mobile: ${{ steps.scope.outputs.wallet_mobile }}
+      verifast: ${{ steps.scope.outputs.verifast }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - name: Use Node.js 24.x
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 24.x
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Rebuild the audited workspace build tool
+        run: pnpm rebuild esbuild
+
+      - name: Reject high and critical dependency advisories
+        run: pnpm audit:security
 
       - name: Check cross-package version references
         # Non-blocking. Multi-package patch PRs (one bump touches several packages whose
@@ -47,105 +96,772 @@ jobs:
         run: node scripts/check-sdk-peer.mjs
 
       - name: Determine changed scope
-        # On PRs, restrict build/lint/test to packages with changes (plus dependents)
-        # via pnpm's `...[BASE]` filter. Push events run the full matrix.
+        # PRs normally test changed packages plus dependents. Changes to the CI
+        # orchestration, root toolchain, or coverage configuration intentionally
+        # exercise the complete workspace so those changes validate themselves.
         id: scope
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE_SHA="${{ github.event.pull_request.base.sha }}"
-            echo "filter=...[${BASE_SHA}]" >> "$GITHUB_OUTPUT"
             CHANGED=$(git diff --name-only "${BASE_SHA}"...HEAD)
-            if echo "$CHANGED" | grep -q '^packages/sdk/'; then
-              echo "sdk=true" >> "$GITHUB_OUTPUT"
-            fi
-            if echo "$CHANGED" | grep -q '^packages/helpers/did/'; then
-              echo "did=true" >> "$GITHUB_OUTPUT"
+            if echo "$CHANGED" | grep -Eq '^(package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig.base.json|codecov.yml|sonar-project.properties|\.sonarcloud\.properties|\.github/workflows/(ci|property-tests|mutation-tests)\.yml|governance/(repository-health|test-quality|mutation-testing)/|scripts/(check-package-artifact|check-wallet-toolbox-platform|repository-health|run-ci-tests|normalize-lcov-paths|run-governed-test|test-governance|mutation-testing|sync-service-(rate-limit|edge)-policy)\.(mjs|test\.mjs)$)'; then
+              FILTER=""
+            else
+              FILTER="...[${BASE_SHA}]"
             fi
           else
-            echo "filter=" >> "$GITHUB_OUTPUT"
-            echo "sdk=true" >> "$GITHUB_OUTPUT"
-            echo "did=true" >> "$GITHUB_OUTPUT"
+            FILTER=""
+            BEFORE_SHA="${{ github.event.before }}"
+            if [ -z "$BEFORE_SHA" ] ||
+               [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ] ||
+               ! git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+              CHANGED=$(git ls-files)
+            else
+              CHANGED=$(git diff --name-only "$BEFORE_SHA"...HEAD)
+            fi
           fi
 
-      - name: Build changed packages
-        # Build the FULL workspace (not just the changed scope): a changed
-        # package's workspace dependencies must have their built dist present
-        # for tsc to resolve them, but those dependencies are not part of the
-        # `...[BASE]` changed+dependents scope. This matches the push-event
-        # build (which already builds everything). Lint/test stay scoped below.
-        # Exclude: workspace root (delegating script) and example-paymail (example package, not production)
+          printf '%s\n' "$CHANGED" > .ci-changed-files.txt
+          echo "filter=$FILTER" >> "$GITHUB_OUTPUT"
+          MUTATION_TARGETS=$(node scripts/mutation-testing.mjs \
+            --affected-file .ci-changed-files.txt)
+          echo "mutation-targets=$MUTATION_TARGETS" >> "$GITHUB_OUTPUT"
+          if [ -n "$FILTER" ]; then
+            PROJECTS=$(pnpm -r --filter "$FILTER" list --depth -1 --json)
+          else
+            PROJECTS=$(pnpm -r list --depth -1 --json)
+          fi
+          AFFECTED=$(jq -r '.[].name' <<<"$PROJECTS")
+          printf '%s\n' "$PROJECTS" > .ci-affected-packages.json
+          STANDARD_PACKAGES=$(node scripts/run-ci-tests.mjs \
+            --projects-json .ci-affected-packages.json)
+          echo "standard-packages=$STANDARD_PACKAGES" >> "$GITHUB_OUTPUT"
+          COVERAGE_OTHER_PACKAGES=$(node scripts/run-ci-tests.mjs \
+            --projects-json .ci-affected-packages.json \
+            --mode coverage-other)
+          echo "coverage-other-packages=$COVERAGE_OTHER_PACKAGES" >> "$GITHUB_OUTPUT"
+
+          for entry in \
+            "sdk:@bsv/sdk" \
+            "did:@bsv/did" \
+            "wallet:@bsv/wallet-toolbox" \
+            "wallet_client:@bsv/wallet-toolbox-client" \
+            "wallet_mobile:@bsv/wallet-toolbox-mobile" \
+            "verifast:@bsv/verifast"; do
+            key="${entry%%:*}"
+            package="${entry#*:}"
+            if grep -Fxq "$package" <<<"$AFFECTED"; then
+              echo "$key=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$key=false" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+      - name: Build workspace
+        # Build the full graph once. Parallel test jobs restore these outputs,
+        # avoiding repeated prerequisite builds while retaining a clean,
+        # frozen install in every isolation boundary.
+        # The docs site is built by its parallel validation job.
+        # Exclude: workspace root, docs site, and example-paymail.
         run: |
-          pnpm -r --filter '!@bsv/ts-stack' --filter '!example-paymail' run build
+          pnpm -r \
+            --filter '!@bsv/ts-stack' \
+            --filter '!docs-site' \
+            --filter '!example-paymail' \
+            run build
+
+      - name: Typecheck workspace
+        # Build outputs exist before this step, so package declarations resolve
+        # exactly as they do for downstream consumers. The recursive contract
+        # catches cross-package nominal-type drift that isolated builds can miss.
+        run: pnpm typecheck
+
+      - name: Verify changed package artifacts
+        env:
+          SCOPE_FILTER: ${{ steps.scope.outputs.filter }}
+        run: |
+          EXTRA=""
+          if [ -n "$SCOPE_FILTER" ]; then EXTRA="--filter $SCOPE_FILTER"; fi
+          pnpm -r --if-present --filter '!@bsv/ts-stack' $EXTRA run pack:check
 
       - name: Lint changed packages
-        continue-on-error: true
         env:
           SCOPE_FILTER: ${{ steps.scope.outputs.filter }}
         run: |
           EXTRA=""
           if [ -n "$SCOPE_FILTER" ]; then EXTRA="--filter $SCOPE_FILTER"; fi
-          pnpm -r --filter '!@bsv/ts-stack' $EXTRA run lint --if-present
+          pnpm exec oxlint scripts --deny-warnings
+          pnpm -r --if-present --filter '!@bsv/ts-stack' $EXTRA run lint
 
-      - name: Warm MongoDB memory-server binary cache
-        # The mongodb-memory-server tests download+extract the mongod binary on first
-        # use. When that cold start happens under the parallel `pnpm -r run test` load
-        # below, the just-extracted binary can still be open for writing when it is
-        # exec'd, producing `spawn ETXTBSY` and startup timeouts (seen on Node 24).
-        # Pre-extract the binary serially here so the test step reuses a settled cache.
-        continue-on-error: true
-        run: >
-          pnpm --filter @bsv/overlay-topics exec node --input-type=module -e
-          "import { MongoMemoryServer } from 'mongodb-memory-server'; const s = await MongoMemoryServer.create({ instance: { launchTimeout: 120000 } }); await s.stop(); console.log('mongodb-memory-server binary cache warmed');"
-
-      - name: Test changed packages
-        # Exclude: workspace root (delegating script) and example-paymail (example package, not production)
+      - name: Check repository and changed-package formatting
         env:
           SCOPE_FILTER: ${{ steps.scope.outputs.filter }}
         run: |
           EXTRA=""
           if [ -n "$SCOPE_FILTER" ]; then EXTRA="--filter $SCOPE_FILTER"; fi
-          pnpm -r --filter '!@bsv/ts-stack' --filter '!example-paymail' $EXTRA run test
+          pnpm format:root
+          pnpm -r --if-present \
+            --filter '!@bsv/ts-stack' \
+            --filter '!docs-site' \
+            --filter '!@bsv/conformance-runner' \
+            --filter '!@bsv/conformance-runner-ts' \
+            $EXTRA run format:check
 
-      - name: Generate coverage (sdk)
-        if: steps.scope.outputs.sdk == 'true'
+      - name: Archive build outputs
+        run: |
+          {
+            find packages -type d \( -name dist -o -name out \) -prune -print0
+            find packages -type f -name '*.tsbuildinfo' -print0
+          } | tar --null --create --gzip --file build-outputs.tar.gz --files-from=-
+
+      - name: Share build outputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: build-outputs
+          path: build-outputs.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  mutation-tests:
+    name: Mutation / ${{ matrix.target }}
+    if: needs.prepare.outputs.mutation-targets != '[]'
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        target: ${{ fromJSON(needs.prepare.outputs.mutation-targets) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Rebuild the audited workspace build tool
+        run: pnpm rebuild esbuild
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build-outputs
+          path: .ci-artifacts
+      - name: Restore build outputs
+        run: tar --extract --gzip --file .ci-artifacts/build-outputs.tar.gz
+      - name: Enforce the affected mutation-quality ratchet
+        run: node scripts/mutation-testing.mjs --target "${{ matrix.target }}"
+      - name: Preserve the machine-readable mutation report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mutation-${{ matrix.target }}
+          path: artifacts/mutation/${{ matrix.target }}/mutation.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  mutation-quality:
+    name: Mutation quality
+    if: always()
+    needs:
+      - prepare
+      - mutation-tests
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Verify the affected mutation targets
+        env:
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+          MUTATION_RESULT: ${{ needs.mutation-tests.result }}
+        run: |
+          if [[ "$PREPARE_RESULT" != "success" ||
+                ( "$MUTATION_RESULT" != "success" && "$MUTATION_RESULT" != "skipped" ) ]]; then
+            echo "::error::Mutation quality failed: prepare=$PREPARE_RESULT mutation=$MUTATION_RESULT"
+            exit 1
+          fi
+
+  standard-tests:
+    name: Tests / non-coverage packages
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build-outputs
+          path: .ci-artifacts
+      - name: Restore build outputs
+        run: tar --extract --gzip --file .ci-artifacts/build-outputs.tar.gz
+      - name: Run affected suites without a coverage script
+        env:
+          STANDARD_PACKAGES: ${{ needs.prepare.outputs.standard-packages }}
+        run: |
+          packages=()
+          while IFS= read -r package; do
+            packages+=("$package")
+          done < <(jq -r '.[]' <<<"$STANDARD_PACKAGES")
+          if [ "${#packages[@]}" -eq 0 ]; then
+            echo "No affected packages require the non-coverage test lane."
+            exit 0
+          fi
+
+          filters=()
+          echo "Non-coverage test lane:"
+          for package in "${packages[@]}"; do
+            echo "  - $package"
+            filters+=(--filter "$package")
+          done
+          pnpm -r "${filters[@]}" run test
+
+  wallet-browser-platform:
+    name: Platform / wallet browser
+    if: needs.prepare.outputs.wallet_client == 'true'
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build-outputs
+          path: .ci-artifacts
+      - run: tar --extract --gzip --file .ci-artifacts/build-outputs.tar.gz
+      - name: Verify packed browser consumer with Vite and esbuild
+        run: pnpm --filter @bsv/wallet-toolbox-client run test:browser
+
+  wallet-mobile-platform:
+    name: Platform / wallet mobile
+    if: needs.prepare.outputs.wallet_mobile == 'true'
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build-outputs
+          path: .ci-artifacts
+      - run: tar --extract --gzip --file .ci-artifacts/build-outputs.tar.gz
+      - name: Verify packed mobile consumer with Metro and Hermes
+        run: pnpm --filter @bsv/wallet-toolbox-mobile run test:mobile
+
+  coverage-sdk:
+    name: Coverage / SDK
+    if: needs.prepare.outputs.sdk == 'true'
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build-outputs
+          path: .ci-artifacts
+      - run: tar --extract --gzip --file .ci-artifacts/build-outputs.tar.gz
+      - name: Generate SDK coverage
         run: |
           pnpm --filter @bsv/sdk run test:coverage
           node scripts/normalize-lcov-paths.mjs packages/sdk/coverage/lcov.info packages/sdk
+          mkdir -p .coverage-output
+          cp packages/sdk/coverage/lcov.info .coverage-output/sdk.lcov.info
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-sdk
+          path: .coverage-output/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
 
-      - name: Generate coverage (did)
-        if: steps.scope.outputs.did == 'true'
+  coverage-did:
+    name: Coverage / DID
+    if: needs.prepare.outputs.did == 'true'
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build-outputs
+          path: .ci-artifacts
+      - run: tar --extract --gzip --file .ci-artifacts/build-outputs.tar.gz
+      - name: Generate DID coverage
         run: |
           pnpm --filter @bsv/did run test:coverage
           node scripts/normalize-lcov-paths.mjs packages/helpers/did/coverage/lcov.info packages/helpers/did
+          mkdir -p .coverage-output
+          cp packages/helpers/did/coverage/lcov.info .coverage-output/did.lcov.info
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-did
+          path: .coverage-output/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
 
-      - name: Compose codecov inputs
-        id: cov
-        if: steps.scope.outputs.sdk == 'true' || steps.scope.outputs.did == 'true'
+  coverage-wallet:
+    name: Coverage / wallet-toolbox (${{ matrix.shard }}/4)
+    if: needs.prepare.outputs.wallet == 'true'
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build allowlisted better-sqlite3 binding
+        working-directory: packages/wallet/wallet-toolbox
+        run: pnpm rebuild better-sqlite3
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build-outputs
+          path: .ci-artifacts
+      - run: tar --extract --gzip --file .ci-artifacts/build-outputs.tar.gz
+      - name: Generate wallet-toolbox coverage shard
         run: |
-          FILES=""
-          FLAGS=""
-          if [ "${{ steps.scope.outputs.sdk }}" = "true" ]; then
-            FILES="packages/sdk/coverage/lcov.info"
-            FLAGS="sdk"
+          pnpm --filter @bsv/wallet-toolbox exec jest \
+            --testPathIgnorePatterns='man.test.ts|bench.test.ts|test/monitor/Monitor.test.ts|client/test|mobile/test' \
+            --coverage \
+            --shard=${{ matrix.shard }}/4 \
+            --coverageDirectory=coverage/shard-${{ matrix.shard }}
+          node scripts/normalize-lcov-paths.mjs \
+            packages/wallet/wallet-toolbox/coverage/shard-${{ matrix.shard }}/lcov.info \
+            packages/wallet/wallet-toolbox
+          mkdir -p .coverage-output
+          cp packages/wallet/wallet-toolbox/coverage/shard-${{ matrix.shard }}/lcov.info \
+            .coverage-output/wallet-${{ matrix.shard }}.lcov.info
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-wallet-${{ matrix.shard }}
+          path: .coverage-output/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
+  coverage-wallet-monitor:
+    name: Coverage / wallet-toolbox monitor
+    if: needs.prepare.outputs.wallet == 'true'
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build allowlisted better-sqlite3 binding
+        working-directory: packages/wallet/wallet-toolbox
+        run: pnpm rebuild better-sqlite3
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build-outputs
+          path: .ci-artifacts
+      - run: tar --extract --gzip --file .ci-artifacts/build-outputs.tar.gz
+      - name: Generate wallet-toolbox monitor coverage
+        run: |
+          pnpm --filter @bsv/wallet-toolbox exec jest \
+            test/monitor/Monitor.test.ts \
+            --coverage \
+            --coverageDirectory=coverage/monitor \
+            --runInBand
+          node scripts/normalize-lcov-paths.mjs \
+            packages/wallet/wallet-toolbox/coverage/monitor/lcov.info \
+            packages/wallet/wallet-toolbox
+          mkdir -p .coverage-output
+          cp packages/wallet/wallet-toolbox/coverage/monitor/lcov.info \
+            .coverage-output/wallet-monitor.lcov.info
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-wallet-monitor
+          path: .coverage-output/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
+  coverage-verifast:
+    name: Coverage / VeriFast
+    if: needs.prepare.outputs.verifast == 'true'
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build-outputs
+          path: .ci-artifacts
+      - run: tar --extract --gzip --file .ci-artifacts/build-outputs.tar.gz
+      - name: Generate VeriFast coverage and run packaged-consumer checks
+        run: |
+          pnpm --filter @bsv/verifast run test:coverage
+          pnpm --filter @bsv/verifast exec node scripts/test-node-consumers.mjs
+          pnpm --filter @bsv/verifast exec node scripts/test-browser-bundler.mjs
+          node scripts/normalize-lcov-paths.mjs packages/verifast/coverage/lcov.info packages/verifast
+          mkdir -p .coverage-output
+          cp packages/verifast/coverage/lcov.info .coverage-output/verifast.lcov.info
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-verifast
+          path: .coverage-output/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
+  coverage-other:
+    name: Coverage / other affected packages (${{ matrix.shard }}/2)
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build-outputs
+          path: .ci-artifacts
+      - run: tar --extract --gzip --file .ci-artifacts/build-outputs.tar.gz
+      - name: Warm MongoDB memory-server binary cache
+        env:
+          MONGOMS_DOWNLOAD_DIR: ${{ runner.temp }}/mongodb-binaries
+        run: >
+          pnpm --filter @bsv/overlay-topics exec node --input-type=module -e
+          "import { MongoMemoryServer } from 'mongodb-memory-server'; const s = await MongoMemoryServer.create({ instance: { launchTimeout: 120000 } }); await s.stop(); console.log('mongodb-memory-server binary cache warmed');"
+      - name: Generate coverage for other affected packages
+        env:
+          COVERAGE_OTHER_PACKAGES: ${{ needs.prepare.outputs.coverage-other-packages }}
+          MONGOMS_DOWNLOAD_DIR: ${{ runner.temp }}/mongodb-binaries
+        run: |
+          packages=()
+          index=0
+          while IFS= read -r package; do
+            if [ $((index % 2 + 1)) -eq "${{ matrix.shard }}" ]; then
+              packages+=("$package")
+            fi
+            index=$((index + 1))
+          done < <(jq -r '.[]' <<<"$COVERAGE_OTHER_PACKAGES")
+
+          filters=()
+          echo "Coverage shard ${{ matrix.shard }}/2:"
+          for package in "${packages[@]}"; do
+            echo "  - $package"
+            filters+=(--filter "$package")
+          done
+          if [ "${#filters[@]}" -gt 0 ]; then
+            pnpm -r --no-sort "${filters[@]}" run test:coverage
+          else
+            echo "No affected coverage packages in this shard."
           fi
-          if [ "${{ steps.scope.outputs.did }}" = "true" ]; then
-            FILES="${FILES:+$FILES,}packages/helpers/did/coverage/lcov.info"
-            FLAGS="${FLAGS:+$FLAGS,}did"
+
+          while IFS= read -r report; do
+            package_dir="${report%/coverage/lcov.info}"
+            node scripts/normalize-lcov-paths.mjs "$report" "$package_dir"
+          done < <(find packages -type f -path '*/coverage/lcov.info' | sort)
+
+          mkdir -p .coverage-output
+          while IFS= read -r report; do
+            artifact_name="${report//\//_}"
+            cp "$report" ".coverage-output/${artifact_name}"
+          done < <(find packages -type f -path '*/coverage/lcov.info' | sort)
+          echo "Coverage-capable packages are tested in this lane; packages without"
+          echo "a coverage script are tested by the non-coverage lane." > .coverage-output/partition.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-other-${{ matrix.shard }}
+          path: .coverage-output/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
+  coverage-upload:
+    name: Coverage / aggregate upload
+    if: >-
+      always() &&
+      needs.prepare.result == 'success' &&
+      needs.coverage-other.result == 'success' &&
+      (needs.coverage-sdk.result == 'success' || needs.coverage-sdk.result == 'skipped') &&
+      (needs.coverage-did.result == 'success' || needs.coverage-did.result == 'skipped') &&
+      (needs.coverage-wallet.result == 'success' || needs.coverage-wallet.result == 'skipped') &&
+      (needs.coverage-wallet-monitor.result == 'success' || needs.coverage-wallet-monitor.result == 'skipped') &&
+      (needs.coverage-verifast.result == 'success' || needs.coverage-verifast.result == 'skipped')
+    needs:
+      - prepare
+      - coverage-sdk
+      - coverage-did
+      - coverage-wallet
+      - coverage-wallet-monitor
+      - coverage-verifast
+      - coverage-other
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: coverage-*
+          path: .coverage-artifacts
+          merge-multiple: true
+      - name: Compose Codecov inputs
+        id: cov
+        run: |
+          FILES="$(find .coverage-artifacts -type f -name '*.lcov.info' | sort | paste -sd, -)"
+          if [ -n "$FILES" ]; then
+            echo "has-coverage=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-coverage=false" >> "$GITHUB_OUTPUT"
           fi
           echo "files=$FILES" >> "$GITHUB_OUTPUT"
-          echo "flags=$FLAGS" >> "$GITHUB_OUTPUT"
 
       - name: Upload coverage to Codecov
-        if: (steps.scope.outputs.sdk == 'true' || steps.scope.outputs.did == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        if: steps.cov.outputs.has-coverage == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ steps.cov.outputs.files }}
-          flags: ${{ steps.cov.outputs.flags }}
           name: ts-stack
           slug: bsv-blockchain/ts-stack
           # Coverage upload is non-blocking: Codecov CLI GPG-verify/outages must not gate CI.
           fail_ci_if_error: false
+
+      - name: SonarQube Cloud scan and quality gate
+        # SONAR_CI_ENABLED is flipped only after a Sonar organization admin
+        # disables Automatic Analysis; the two methods cannot run together.
+        # Dependabot changes are covered by audit + dependency review and do
+        # not receive Actions secrets.
+        if: vars.SONAR_CI_ENABLED == 'true' && github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  build-and-test:
+    name: build-and-test (24.x)
+    if: always()
+    needs:
+      - prepare
+      - standard-tests
+      - coverage-upload
+      - wallet-browser-platform
+      - wallet-mobile-platform
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Verify parallel build, test, and coverage lanes
+        env:
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+          TEST_RESULT: ${{ needs.standard-tests.result }}
+          COVERAGE_RESULT: ${{ needs.coverage-upload.result }}
+          BROWSER_RESULT: ${{ needs.wallet-browser-platform.result }}
+          MOBILE_RESULT: ${{ needs.wallet-mobile-platform.result }}
+        run: |
+          if [[ "$PREPARE_RESULT" != "success" ||
+                "$TEST_RESULT" != "success" ||
+                "$COVERAGE_RESULT" != "success" ||
+                ( "$BROWSER_RESULT" != "success" && "$BROWSER_RESULT" != "skipped" ) ||
+                ( "$MOBILE_RESULT" != "success" && "$MOBILE_RESULT" != "skipped" ) ]]; then
+            echo "::error::Build/test lanes failed: prepare=$PREPARE_RESULT tests=$TEST_RESULT coverage=$COVERAGE_RESULT browser=$BROWSER_RESULT mobile=$MOBILE_RESULT"
+            exit 1
+          fi
+
+  infra-scope:
+    name: Detect affected infrastructure
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Build affected component matrix
+        id: matrix
+        run: |
+          COMPONENTS='[
+            {"component":"chaintracks-server","native-modules":"better-sqlite3"},
+            {"component":"message-box-server","native-modules":"better-sqlite3"},
+            {"component":"overlay-server","native-modules":""},
+            {"component":"uhrp-server-basic","native-modules":""},
+            {"component":"uhrp-server-cloud-bucket","native-modules":"better-sqlite3"},
+            {"component":"uhrp-server-cloud-bucket/notifier","native-modules":""},
+            {"component":"wab","native-modules":"better-sqlite3 sqlite3"},
+            {"component":"wallet-infra","native-modules":"better-sqlite3"}
+          ]'
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            SELECTED=$(jq -c 'map(. + {run:true, display:.component})' <<<"$COMPONENTS")
+          else
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            if git diff --quiet "$BASE_SHA"...HEAD -- .github/workflows/ci.yml; then
+              SELECTED='[]'
+              while IFS= read -r row; do
+                component=$(jq -r '.component' <<<"$row")
+                if ! git diff --quiet "$BASE_SHA"...HEAD -- "infra/$component/"; then
+                  SELECTED=$(jq -c --argjson row "$row" '. + [$row + {run:true, display:$row.component}]' <<<"$SELECTED")
+                fi
+              done < <(jq -c '.[]' <<<"$COMPONENTS")
+            else
+              SELECTED=$(jq -c 'map(. + {run:true, display:.component})' <<<"$COMPONENTS")
+            fi
+          fi
+
+          if [ "$(jq 'length' <<<"$SELECTED")" -eq 0 ]; then
+            SELECTED='[{"component":"_none","native-modules":"","run":false,"display":"no changes"}]'
+          fi
+
+          jq -cn --argjson include "$SELECTED" '{include:$include}' |
+            sed 's/^/matrix=/' >> "$GITHUB_OUTPUT"
+
+  infra:
+    name: Infra / ${{ matrix.display }}
+    needs: infra-scope
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.infra-scope.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: matrix.run
+
+      - name: Use Node.js 24
+        if: matrix.run
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: infra/${{ matrix.component }}/package-lock.json
+
+      - name: Install locked dependencies
+        if: matrix.run
+        working-directory: infra/${{ matrix.component }}
+        run: npm ci --ignore-scripts
+
+      - name: Build allowlisted native modules
+        if: matrix.run && matrix.native-modules != ''
+        working-directory: infra/${{ matrix.component }}
+        env:
+          NATIVE_MODULES: ${{ matrix.native-modules }}
+        run: npm rebuild $NATIVE_MODULES
+
+      - name: Reject high and critical dependency advisories
+        if: matrix.run
+        working-directory: infra/${{ matrix.component }}
+        run: npm audit --audit-level=high
+
+      - name: Build
+        if: matrix.run
+        working-directory: infra/${{ matrix.component }}
+        run: npm run build --if-present
+
+      - name: Lint
+        if: matrix.run
+        working-directory: infra/${{ matrix.component }}
+        run: npm run lint --if-present
+
+      - name: Test
+        if: matrix.run
+        working-directory: infra/${{ matrix.component }}
+        run: npm test --if-present
+
+      - name: Build Linux image
+        if: matrix.run && matrix.component != 'uhrp-server-cloud-bucket/notifier'
+        run: |
+          for attempt in 1 2 3; do
+            if docker build --tag "ts-stack-${{ strategy.job-index }}:ci" "infra/${{ matrix.component }}"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::Docker build attempt $attempt failed; retrying after $((attempt * 5)) seconds."
+              sleep $((attempt * 5))
+            fi
+          done
+          exit 1
+
+      - name: Reject high and critical image vulnerabilities
+        if: matrix.run && matrix.component != 'uhrp-server-cloud-bucket/notifier'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ts-stack-${{ strategy.job-index }}:ci
+          scanners: vuln
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: false
+          exit-code: '1'
+          format: table
+          timeout: 15m
 
   docs-validate:
     name: Docs Site Validation
@@ -156,42 +872,60 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Rebuild the audited docs build tool
+        run: pnpm rebuild esbuild
+
+      - name: Check docs source quality
+        run: |
+          pnpm --filter docs-site format:check
+          pnpm --filter docs-site lint
+          pnpm --filter docs-site test
+          pnpm --filter docs-site typecheck
 
       - name: Validate frontmatter + links (docs site)
         run: pnpm --filter docs-site validate
 
-      # Full `pnpm docs:build` (SSG + pagefind + built-link checks + TypeDoc merge) runs in docs-deploy.yml
-      # on pushes to main. This job provides fast feedback on every PR that touches docs.
+      - name: Build docs site
+        # This was previously part of the serial full-workspace build. Running
+        # it here preserves the SSG, pagefind, and built-link checks while
+        # moving that CPU work off the package build/test critical path.
+        run: pnpm --filter docs-site build
 
   conformance:
     name: Conformance Vectors
     runs-on: ubuntu-latest
-    needs: [build-and-test]
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: pnpm
 
-      - run: pnpm install --ignore-scripts
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Check structural conformance runner quality
+        run: |
+          pnpm --filter @bsv/conformance-runner format:check
+          pnpm --filter @bsv/conformance-runner lint
+          pnpm --filter @bsv/conformance-runner build
 
       - name: Validate conformance vectors (TS)
         run: cd conformance/runner && node src/runner.js --validate-only
@@ -216,3 +950,55 @@ jobs:
           name: conformance-vectors
           path: conformance/vectors/
           retention-days: 90
+
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Block newly introduced high and critical vulnerabilities
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: never
+
+  merge-gate:
+    name: merge-gate
+    if: always()
+    needs:
+      - repository-health
+      - build-and-test
+      - mutation-quality
+      - infra
+      - docs-validate
+      - conformance
+      - dependency-review
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Verify every required CI result
+        env:
+          HEALTH_RESULT: ${{ needs.repository-health.result }}
+          BUILD_RESULT: ${{ needs.build-and-test.result }}
+          MUTATION_RESULT: ${{ needs.mutation-quality.result }}
+          INFRA_RESULT: ${{ needs.infra.result }}
+          DOCS_RESULT: ${{ needs.docs-validate.result }}
+          CONFORMANCE_RESULT: ${{ needs.conformance.result }}
+          DEPENDENCY_RESULT: ${{ needs.dependency-review.result }}
+        run: |
+          if [[ "$HEALTH_RESULT" != "success" ||
+                "$BUILD_RESULT" != "success" ||
+                "$MUTATION_RESULT" != "success" ||
+                "$INFRA_RESULT" != "success" ||
+                "$DOCS_RESULT" != "success" ||
+                "$CONFORMANCE_RESULT" != "success" ]]; then
+            echo "::error::Required CI failed: health=$HEALTH_RESULT build=$BUILD_RESULT mutation=$MUTATION_RESULT infra=$INFRA_RESULT docs=$DOCS_RESULT conformance=$CONFORMANCE_RESULT"
+            exit 1
+          fi
+          if [[ "$DEPENDENCY_RESULT" != "success" && "$DEPENDENCY_RESULT" != "skipped" ]]; then
+            echo "::error::Dependency review failed: dependency-review=$DEPENDENCY_RESULT"
+            exit 1
+          fi

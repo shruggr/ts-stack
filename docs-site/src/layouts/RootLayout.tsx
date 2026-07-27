@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router'
 import { MDXProvider } from '@mdx-js/react'
 import Header from '../components/Header'
 import Sidebar from '../components/Sidebar'
@@ -33,7 +33,7 @@ export default function RootLayout() {
                 zIndex: 49,
                 background: 'rgba(0,0,0,0.5)',
                 border: 0,
-                padding: 0,
+                padding: 0
               }}
               onClick={() => setSidebarOpen(false)}
             />

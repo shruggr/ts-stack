@@ -2,31 +2,32 @@
   "name": "example-paymail",
   "version": "1.0.0",
   "private": true,
-  "description": "",
-  "main": "index.js",
+  "description": "Private, compiled examples for @bsv/paymail",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "pnpm typecheck",
     "build": "tsc -p tsconfig.json",
-    "lint": "ts-standard --fix src/**/*.ts",
-    "server": "npm run build && node dist/cjs/src/server.js",
-    "client": "npm run build && node dist/cjs/src/client.js",
-    "getProfile": "npm run build && node dist/cjs/src/client/getProfile.js",
-    "getPki": "npm run build && node dist/cjs/src/client/getPki.js",
-    "sendP2P": "npm run build && node dist/cjs/src/client/sendP2P.js",
-    "sendBeefP2P": "npm run build && node dist/cjs/src/client/sendP2PBeef.js"
+    "format:check": "pnpm --workspace-root exec prettier --check \"packages/messaging/ts-paymail/docs/examples/**/*.{json,ts}\"",
+    "lint": "oxlint src --deny-warnings",
+    "server": "pnpm build && node dist/cjs/src/server.js",
+    "client": "pnpm build && node dist/cjs/src/client.js",
+    "getProfile": "pnpm build && node dist/cjs/src/client/getProfile.js",
+    "getPki": "pnpm build && node dist/cjs/src/client/getPki.js",
+    "sendP2P": "pnpm build && node dist/cjs/src/client/sendP2P.js",
+    "sendBeefP2P": "pnpm build && node dist/cjs/src/client/sendP2PBeef.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit --incremental false"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "BSV Blockchain Association",
+  "license": "SEE LICENSE IN LICENSE.txt",
   "dependencies": {
     "@bsv/paymail": "workspace:^",
-    "@bsv/sdk": "^2.1.6",
+    "@bsv/sdk": "workspace:^",
     "express": "^5.2.1",
-    "jwt-simple": "^0.5.6",
-    "ts-standard": "^12.0.2"
+    "jwt-simple": "^0.5.6"
   },
   "devDependencies": {
-    "@types/node": "^26.0.0",
-    "typescript": "^6.0.3"
+    "@types/node": "^26.1.1",
+    "typescript": "^6.0.3",
+    "oxlint": "^1.75.0"
   },
   "repository": {
     "type": "git",

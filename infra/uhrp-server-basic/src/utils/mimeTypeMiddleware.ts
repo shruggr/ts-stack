@@ -4,6 +4,7 @@ import fs from 'fs'
 import { getWallet } from './walletSingleton'
 import { Utils } from '@bsv/sdk'
 import { log } from '../logger'
+import { CDN_ROOT } from './cdnObjectPath'
 
 /**
  * Cache to store MIME types for object identifiers to avoid repeated database lookups
@@ -11,44 +12,6 @@ import { log } from '../logger'
 const mimeTypeCache = new Map<string, string>()
 const CACHE_TTL = 5 * 60 * 1000 // 5 minutes in milliseconds
 const cacheTimestamps = new Map<string, number>()
-const CDN_ROOT = path.resolve(__dirname, '../../public/cdn')
-
-/**
- * Fallback MIME type mapping based on common file extensions
- * This is used as a last resort if we can't find the MIME type in the UHRP advertisements
- */
-const extensionMimeMap: { [key: string]: string } = {
-  '.html': 'text/html',
-  '.htm': 'text/html',
-  '.css': 'text/css',
-  '.js': 'application/javascript',
-  '.json': 'application/json',
-  '.xml': 'application/xml',
-  '.txt': 'text/plain',
-  '.md': 'text/markdown',
-  '.pdf': 'application/pdf',
-  '.zip': 'application/zip',
-  '.tar': 'application/x-tar',
-  '.gz': 'application/gzip',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp',
-  '.ico': 'image/x-icon',
-  '.mp4': 'video/mp4',
-  '.avi': 'video/x-msvideo',
-  '.mov': 'video/quicktime',
-  '.wmv': 'video/x-ms-wmv',
-  '.mp3': 'audio/mpeg',
-  '.wav': 'audio/wav',
-  '.ogg': 'audio/ogg',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.otf': 'font/otf'
-}
 
 /**
  * Get MIME type from UHRP advertisement tags
@@ -142,7 +105,7 @@ function detectMimeTypeFromContent(filePath: string): string {
         try {
           JSON.parse(textSample.trim())
           return 'application/json'
-        } catch (e) {
+        } catch {
           // Not valid JSON
         }
       }

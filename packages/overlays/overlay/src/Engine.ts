@@ -41,6 +41,7 @@ import {
   extractMerkleProofMetadata
 } from './BASM.js'
 import { BASMRemote } from './BASMRemote.js'
+import { serializeErrorForLog, serializeLogValue } from './SafeLog.js'
 
 const DEFAULT_GASP_SYNC_LIMIT = 10000
 const DEFAULT_BASM_RANGE_LIMIT = 1024
@@ -103,11 +104,7 @@ export class Engine {
   ) {
     // To encourage synchronization of overlay services, the SHIP sync strategy is used by default for all overlay topics, except for 'tm_ship' and 'tm_slap'.
     // For these two topics, any existing trackers are combined with the provided shipTrackers and slapTrackers omitting any duplicates.
-    if (syncConfiguration === undefined) {
-      this.syncConfiguration = {}
-    } else {
-      this.syncConfiguration = syncConfiguration
-    }
+    this.syncConfiguration ??= {}
 
     for (const managerName of Object.keys(managers)) {
       if (managerName === 'tm_ship' && this.shipTrackers !== undefined && this.syncConfiguration[managerName] !== false) {
@@ -167,7 +164,7 @@ export class Engine {
       }
       return header.blockHash
     } catch (error) {
-      this.logger.warn(`Unable to resolve BASM block hash for height ${blockHeight}: ${error instanceof Error ? error.message : String(error)}`)
+      this.logger.warn(`Unable to resolve BASM block hash: height=${serializeLogValue(blockHeight)} error=${serializeErrorForLog(error)}`)
       return undefined
     }
   }
@@ -303,7 +300,7 @@ export class Engine {
 
     if (toHeight - fromHeight + 1 > DEFAULT_BASM_RANGE_LIMIT) {
       // Bound the work per pass; the next trigger resumes from the new tip.
-      this.logger.warn(`[BASM] capping anchor chain extension for "${topic}" at ${DEFAULT_BASM_RANGE_LIMIT} blocks (requested ${fromHeight}..${toHeight}); will continue on the next pass`)
+      this.logger.warn(`[BASM] capping anchor chain extension: topic=${serializeLogValue(topic)} limit=${serializeLogValue(DEFAULT_BASM_RANGE_LIMIT)} requestedFrom=${serializeLogValue(fromHeight)} requestedTo=${serializeLogValue(toHeight)}; will continue on the next pass`)
       toHeight = fromHeight + DEFAULT_BASM_RANGE_LIMIT - 1
     }
 
@@ -319,7 +316,7 @@ export class Engine {
       // canonical re-resolution from the header resolver instead of reusing it.
       const blockHash = blockHashHints.get(height) ?? (forceResolve ? undefined : existing?.blockHash) ?? await this.resolveBlockHash(height)
       if (blockHash === undefined) {
-        this.logger.warn(`[BASM] unable to resolve block hash for "${topic}" at height ${height}; halting chain extension`)
+        this.logger.warn(`[BASM] unable to resolve block hash: topic=${serializeLogValue(topic)} height=${serializeLogValue(height)}; halting chain extension`)
         return
       }
 
@@ -571,7 +568,7 @@ export class Engine {
           admissibleOutputs
         }
       } catch (error) {
-        this.logger.error('Error validating topic during submit:', error)
+        this.logger.error(`Error validating topic during submit: topic=${serializeLogValue(topic)} error=${serializeErrorForLog(error)}`)
         failedTopics.add(topic)
         return {
           topic,
@@ -919,7 +916,7 @@ export class Engine {
   async lookup(lookupQuestion: LookupQuestion): Promise<LookupAnswer> {
     // Validate a lookup service for the provider is found
     const lookupService = this.lookupServices[lookupQuestion.service]
-    if (lookupService === undefined || lookupService === null) throw new Error(`Lookup service not found for provider: ${lookupQuestion.service} `)
+    if (lookupService === undefined || lookupService === null) throw new Error(`Lookup service not found for provider: ${lookupQuestion.service}`)
 
     const lookupResult = await lookupService.lookup(lookupQuestion)
     const hydrationContext = this.createUTXOHistoryHydrationContext()
@@ -1954,20 +1951,20 @@ export class Engine {
    * @param proof for txid
    */
   private updateInputProofs(tx: Transaction, txid: string, proof: MerklePath): void {
-    if (tx.merklePath !== undefined) {
+    if (tx.id('hex') === txid) {
       // Update the merkle path to handle potential reorgs
       tx.merklePath = proof
       return
     }
-    if (tx.id('hex') === txid) {
-      tx.merklePath = proof
-    } else {
-      for (const input of tx.inputs) {
-        // All inputs must have sourceTransactions
-        const stx = input.sourceTransaction
-        if (typeof stx !== 'object') continue
-        this.updateInputProofs(stx, txid, proof)
-      }
+    // A mined transaction's source graph is no longer part of its BEEF. Do not
+    // replace an unrelated transaction's proof with the proof for an ancestor.
+    if (tx.merklePath !== undefined) return
+
+    for (const input of tx.inputs) {
+      // All inputs must have sourceTransactions
+      const stx = input.sourceTransaction
+      if (typeof stx !== 'object') continue
+      this.updateInputProofs(stx, txid, proof)
     }
   }
 
@@ -1984,13 +1981,8 @@ export class Engine {
     }
 
     const tx = Transaction.fromBEEF(output.beef)
-    if (tx.merklePath !== undefined) {
-      // Update the merkle path to handle potential reorgs
-      tx.merklePath = proof
-      return
-    }
-
-    // recursively update all sourceTransactions proven by (txid,proof)
+    // Update this transaction, or recursively update the matching source
+    // transaction. This also persists replacement proofs after a reorg.
     this.updateInputProofs(tx, txid, proof)
 
     // Update the output's BEEF in the storage DB
@@ -2191,7 +2183,7 @@ export class Engine {
 
       // If none of the disallowed conditions matched, the URL is valid
       return true
-    } catch (_e) {
+    } catch {
       // URL constructor throws on malformed input — not a valid URL, return false
       return false
     }

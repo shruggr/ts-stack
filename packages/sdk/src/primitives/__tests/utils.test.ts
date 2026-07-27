@@ -10,7 +10,9 @@ import {
   fromBase58Check,
   toBase58Check,
   verifyNotNull,
-  constantTimeEquals
+  constantTimeEquals,
+  hexToUint8Array,
+  toUint8Array
 } from '../../primitives/utils'
 import Point from '../../primitives/Point'
 
@@ -24,6 +26,12 @@ describe('utils', () => {
     expect(toArray([1, 2, 3, 4])).toEqual([1, 2, 3, 4])
   })
 
+  it('decodes hex directly to Uint8Array with legacy odd-length handling', () => {
+    expect(hexToUint8Array('00aBff')).toEqual(new Uint8Array([0, 0xab, 0xff]))
+    expect(toUint8Array('abc', 'hex')).toEqual(new Uint8Array([0x0a, 0xbc]))
+    expect(() => hexToUint8Array('not hex')).toThrow('Invalid hex string')
+  })
+
   it('should zero pad byte to hex', () => {
     expect(zero2('0')).toBe('00')
     expect(zero2('01')).toBe('01')
@@ -31,6 +39,30 @@ describe('utils', () => {
 
   it('should convert to hex', () => {
     expect(toHex([0, 1, 2, 3])).toBe('00010203')
+  })
+
+  it('should convert to hex without a global Buffer implementation', () => {
+    const originalBuffer = Object.getOwnPropertyDescriptor(globalThis, 'Buffer')
+    Object.defineProperty(globalThis, 'Buffer', {
+      value: undefined,
+      configurable: true,
+      writable: true
+    })
+
+    try {
+      jest.isolateModules(() => {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { toHex: fallbackToHex } = require('../../primitives/utils')
+        expect(fallbackToHex([])).toBe('')
+        expect(fallbackToHex(new Uint8Array([0, 1, 254, 255]))).toBe('0001feff')
+      })
+    } finally {
+      if (originalBuffer === undefined) {
+        delete (globalThis as any).Buffer
+      } else {
+        Object.defineProperty(globalThis, 'Buffer', originalBuffer)
+      }
+    }
   })
 
   it('should encode', () => {
@@ -78,6 +110,14 @@ describe('utils', () => {
     it('Converts to base58 as expected with 1s', () => {
       const actual = toBase58([0, 0, 0, 4])
       expect(actual).toEqual('1115')
+    })
+    it.each([
+      [[255]],
+      [[255, 255]],
+      [[0, 255, 0, 255]],
+      [Array.from({ length: 32 }, () => 255)]
+    ])('round-trips boundary byte values', (input) => {
+      expect(fromBase58(toBase58(input))).toEqual(input)
     })
   })
   describe('base58check encoding and decoding', () => {

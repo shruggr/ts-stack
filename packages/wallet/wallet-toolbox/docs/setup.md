@@ -58,6 +58,7 @@ export interface SetupClientWalletArgs {
     active?: WalletStorageProvider;
     backups?: WalletStorageProvider[];
     taalApiKey?: string;
+    scriptVerifier?: SpendVerifierInterface;
 }
 ```
 
@@ -88,6 +89,15 @@ Defaults to undefined.
 
 ```ts
 privilegedKeyGetter?: () => Promise<PrivateKey>
+```
+
+###### Property scriptVerifier
+
+Optional high-performance verifier for internal wallet and locally hosted
+storage validation. This does not alter the BRC-100 interface.
+
+```ts
+scriptVerifier?: SpendVerifierInterface
 ```
 
 ###### Property rootKeyHex
@@ -332,6 +342,7 @@ export interface SetupWalletArgs {
     privilegedKeyGetter?: () => Promise<PrivateKey>;
     active?: WalletStorageProvider;
     backups?: WalletStorageProvider[];
+    scriptVerifier?: SpendVerifierInterface;
 }
 ```
 
@@ -371,6 +382,15 @@ Defaults to undefined.
 
 ```ts
 privilegedKeyGetter?: () => Promise<PrivateKey>
+```
+
+###### Property scriptVerifier
+
+Optional high-performance verifier for internal wallet and locally hosted
+storage validation. This does not alter the BRC-100 interface.
+
+```ts
+scriptVerifier?: SpendVerifierInterface
 ```
 
 ###### Property rootKeyHex
@@ -570,8 +590,8 @@ MY_TEST_IDENTITY = '${testIdentityKey1}'
 MY_TEST_IDENTITY2 = '${testIdentityKey2}'
 MY_MAIN_IDENTITY = '${mainIdentityKey1}'
 MY_MAIN_IDENTITY2 = '${mainIdentityKey2}'
-MAIN_TAAL_API_KEY='mainnet_9596de07e92300c6287e4393594ae39c'
-TEST_TAAL_API_KEY='testnet_0e6cf72133b43ea2d7861da2a38684e3'
+MAIN_TAAL_API_KEY='replace-with-your-mainnet-api-key'
+TEST_TAAL_API_KEY='replace-with-your-testnet-api-key'
 MYSQL_CONNECTION='{"port":3306,"host":"127.0.0.1","user":"root","password":"your_password","database":"your_database", "timezone": "Z"}'
 DEV_KEYS = '{
     "${testIdentityKey1}": "${testPrivKey1.toString()}",
@@ -966,8 +986,8 @@ MY_TEST_IDENTITY = '${testIdentityKey1}'
 MY_TEST_IDENTITY2 = '${testIdentityKey2}'
 MY_MAIN_IDENTITY = '${mainIdentityKey1}'
 MY_MAIN_IDENTITY2 = '${mainIdentityKey2}'
-MAIN_TAAL_API_KEY='mainnet_9596de07e92300c6287e4393594ae39c'
-TEST_TAAL_API_KEY='testnet_0e6cf72133b43ea2d7861da2a38684e3'
+MAIN_TAAL_API_KEY='replace-with-your-mainnet-api-key'
+TEST_TAAL_API_KEY='replace-with-your-testnet-api-key'
 MYSQL_CONNECTION='{"port":3306,"host":"127.0.0.1","user":"root","password":"your_password","database":"your_database", "timezone": "Z"}'
 DEV_KEYS = '{
     "${testIdentityKey1}": "${testPrivKey1.toString()}",

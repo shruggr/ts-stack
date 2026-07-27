@@ -1,6 +1,13 @@
 {
   "name": "@bsv/overlay-express",
-  "version": "2.4.1",
+  "version": "2.4.2",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "description": "BSV Blockchain Overlay Express",
   "main": "dist/cjs/mod.js",
@@ -8,32 +15,46 @@
   "types": "dist/types/mod.d.ts",
   "files": [
     "dist",
-    "src",
-    "docs",
-    "mod.ts",
+    "!dist/**/*.tsbuildinfo",
+    "README.md",
     "LICENSE.txt"
   ],
   "exports": {
     ".": {
-      "types": "./dist/types/mod.d.ts",
-      "import": "./dist/esm/mod.js",
-      "require": "./dist/cjs/mod.js"
+      "import": {
+        "types": "./dist/types/mod.d.ts",
+        "default": "./dist/esm/mod.js"
+      },
+      "require": {
+        "types": "./dist/cjs/mod.d.ts",
+        "default": "./dist/cjs/mod.js"
+      }
     },
     "./*.ts": {
-      "types": "./dist/types/src/*.d.ts",
-      "import": "./dist/esm/src/*.js",
-      "require": "./dist/cjs/src/*.js"
+      "import": {
+        "types": "./dist/types/src/*.d.ts",
+        "default": "./dist/esm/src/*.js"
+      },
+      "require": {
+        "types": "./dist/cjs/src/*.d.ts",
+        "default": "./dist/cjs/src/*.js"
+      }
     }
   },
   "scripts": {
-    "test": "jest",
+    "test": "jest --watchman=false",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
-    "lint": "ts-standard --fix src/**/*.ts",
-    "lint:ci": "ts-standard src/**/*.ts",
+    "test:coverage": "jest --coverage --watchman=false",
+    "test:property": "jest --runInBand --watchman=false --runTestsByPath src/__tests/ReorgStream.property.test.ts",
+    "test:live": "pnpm build && node ../../../scripts/run-governed-test.mjs live src/__tests__/OverlayProviders.live.test.ts",
+    "format:check": "pnpm --workspace-root exec prettier --check \"packages/overlays/overlay-express/{README.md,jest.config.js,mod.ts,package.json,tsconfig*.json}\"",
+    "lint": "oxlint mod.ts src jest.config.js --deny-warnings",
+    "lint:ci": "pnpm lint",
+    "pack:check": "pnpm --filter @bsv/overlay build && pnpm --filter @bsv/overlay-discovery-services build && pnpm build && node ../../../scripts/check-package-artifact.mjs . --local-consumer-dependencies ../overlay,../overlay-discovery-services --exports ArcadeProvider,BanAwareLookupWrapper,BanAwareSHIPStorage,BanAwareSLAPStorage,BanAwareTopicManager,BanService,ChaintracksProvider,JanitorService,OverlayMonitor,ProviderChainBroadcaster,analyzeOverlayAnchorTip,analyzeOverlayLookupResponse,default,isTerminalArcStatus",
+    "typecheck": "tsc --project tsconfig.base.json --noEmit --incremental false",
     "build": "tsc -b && tsconfig-to-dual-package tsconfig.cjs.json",
     "dev": "tsc -b -w",
-    "prepublish": "npm run build",
+    "prepublishOnly": "pnpm build",
     "doc": "ts2md --inputFilename=mod.ts --outputFilename=API.md --filenameSubstring=API --firstHeadingLevel=1",
     "demo": "rm -r dist && npm run build && npx tsx demo-ui.ts"
   },
@@ -56,29 +77,30 @@
   },
   "homepage": "https://github.com/bsv-blockchain/ts-stack/tree/main/packages/overlays/overlay-express#readme",
   "devDependencies": {
+    "@bsv/sdk": "workspace:^",
     "@jest/globals": "^30.4.1",
-    "@types/body-parser": "^1.19.5",
-    "@types/express": "^5.0.0",
+    "@types/body-parser": "^1.19.6",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
-    "@types/node": "^26.0.0",
+    "@types/node": "^26.1.1",
+    "fast-check": "^4.9.0",
     "jest": "^30.4.2",
-    "ts-jest": "^29.4.11",
-    "ts-standard": "^12.0.2",
-    "ts2md": "^0.2.0",
+    "ts-jest": "^29.4.12",
+    "ts2md": "^0.2.8",
     "tsconfig-to-dual-package": "^1.2.0",
     "typescript": "^6.0.3",
-    "@bsv/sdk": "workspace:^"
+    "oxlint": "^1.75.0"
   },
   "dependencies": {
-    "@bsv/auth-express-middleware": "^2.1.0",
-    "@bsv/overlay": "^2.1.1",
-    "@bsv/overlay-discovery-services": "^2.1.0",
-    "@bsv/wallet-toolbox-client": "^2.3.3",
+    "@bsv/auth-express-middleware": "workspace:^",
+    "@bsv/overlay": "workspace:^",
+    "@bsv/overlay-discovery-services": "workspace:^",
+    "@bsv/wallet-toolbox-client": "workspace:^",
     "body-parser": "^2.3.0",
     "chalk": "^5.6.2",
     "express": "^5.2.1",
-    "knex": "^3.2.10",
-    "mongodb": "^7.3.0",
+    "knex": "^3.3.0",
+    "mongodb": "^7.5.0",
     "uuid": "^14.0.1"
   },
   "peerDependencies": {

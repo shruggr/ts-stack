@@ -9,20 +9,21 @@ import { WERR_INVALID_PARAMETER } from '../../sdk/WERR_errors'
 import { asBsvSdkScript, verifyTruthy } from '../../utility/utilityHelpers'
 import { KeyPair } from '../../sdk/types'
 import { ScriptTemplateBRC29 } from '../../utility/ScriptTemplateBRC29'
+import { maxPossibleSatoshis } from '../../storage/methods/generateChange'
 
-export function buildSignableTransaction (
+export function buildSignableTransaction(
   dctr: StorageCreateActionResult,
   args: Validation.ValidCreateActionArgs,
   wallet: Wallet
 ): {
-    tx: Transaction
-    amount: number
-    pdi: PendingStorageInput[]
-    log: string
-  } {
+  tx: Transaction
+  amount: number
+  pdi: PendingStorageInput[]
+  log: string
+} {
   const changeKeys = wallet.getClientChangeKeyPair()
 
-  const inputBeef = (args.inputBEEF != null) ? Beef.fromBinary(args.inputBEEF) : undefined
+  const inputBeef = args.inputBEEF != null ? Beef.fromBinary(args.inputBEEF) : undefined
 
   const { inputs: storageInputs, outputs: storageOutputs } = dctr
 
@@ -50,7 +51,7 @@ export function buildSignableTransaction (
   // Commission output
   // Change outputs
   // The Vout values will be randomized if args.options.randomizeOutputs is true. Default is true.
-  const voutToIndex = new Array<number>(storageOutputs.length)
+  const voutToIndex = Array.from({ length: storageOutputs.length }, () => 0)
   for (let vout = 0; vout < storageOutputs.length; vout++) {
     const i = storageOutputs.findIndex(o => o.vout === vout)
     if (i < 0) throw new WERR_INVALID_PARAMETER('output.vout', `sequential. ${vout} is missing`)
@@ -63,7 +64,9 @@ export function buildSignableTransaction (
   for (let vout = 0; vout < storageOutputs.length; vout++) {
     const i = voutToIndex[vout]
     const out = storageOutputs[i]
-    if (vout !== out.vout) { throw new WERR_INVALID_PARAMETER('output.vout', `equal to array index. ${out.vout} !== ${vout}`) }
+    if (vout !== out.vout) {
+      throw new WERR_INVALID_PARAMETER('output.vout', `equal to array index. ${out.vout} !== ${vout}`)
+    }
 
     const change = out.providedBy === 'storage' && out.purpose === 'change'
 
@@ -154,11 +157,12 @@ export function buildSignableTransaction (
       const inputToAdd: TransactionInput = {
         sourceTXID: storageInput.sourceTxid,
         sourceOutputIndex: storageInput.sourceVout,
-        sourceTransaction: (storageInput.sourceTransaction != null)
-          ? storageInput.sourceTransaction instanceof Uint8Array
-            ? Transaction.fromBinaryView(storageInput.sourceTransaction)
-            : Transaction.fromBinary(storageInput.sourceTransaction)
-          : undefined,
+        sourceTransaction:
+          storageInput.sourceTransaction != null
+            ? storageInput.sourceTransaction instanceof Uint8Array
+              ? Transaction.fromBinaryView(storageInput.sourceTransaction)
+              : Transaction.fromBinary(storageInput.sourceTransaction)
+            : undefined,
         unlockingScript: new Script(),
         sequence: 0xffffffff
       }
@@ -201,7 +205,7 @@ export function buildSignableTransaction (
  * @throws WERR_INVALID_PARAMETER if storage omitted, reclassified, or modified
  *   any caller-specified output.
  */
-export function verifyRequestedOutputsUnchanged (
+export function verifyRequestedOutputsUnchanged(
   storageOutputs: StorageCreateTransactionSdkOutput[],
   args: Validation.ValidCreateActionArgs
 ): void {
@@ -235,7 +239,7 @@ export function verifyRequestedOutputsUnchanged (
       )
     }
 
-    if (provided.satoshis !== requested.satoshis) {
+    if (requested.satoshis !== maxPossibleSatoshis && provided.satoshis !== requested.satoshis) {
       throw new WERR_INVALID_PARAMETER(
         'output.satoshis',
         `equal to the caller-requested satoshis. Storage returned ${provided.satoshis} for output index ${i}, caller requested ${requested.satoshis}.`
@@ -278,7 +282,7 @@ export const MAX_STORAGE_COMMISSION_SATOSHIS = 500000
  * @throws WERR_INVALID_PARAMETER if storage returned an unrecognized output, more
  *   than one commission output, or a commission exceeding `maxCommission`.
  */
-export function verifyUnrequestedOutputsAreChangeOrCommission (
+export function verifyUnrequestedOutputsAreChangeOrCommission(
   storageOutputs: StorageCreateTransactionSdkOutput[],
   args: Validation.ValidCreateActionArgs,
   maxCommission: number = MAX_STORAGE_COMMISSION_SATOSHIS
@@ -321,7 +325,7 @@ export function verifyUnrequestedOutputsAreChangeOrCommission (
 /**
  * Derive a change output locking script
  */
-export function makeChangeLock (
+export function makeChangeLock(
   out: StorageCreateTransactionSdkOutput,
   dctr: StorageCreateActionResult,
   args: Validation.ValidCreateActionArgs,

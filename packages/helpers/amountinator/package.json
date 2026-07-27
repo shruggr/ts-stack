@@ -1,22 +1,50 @@
 {
   "name": "@bsv/amountinator",
-  "version": "2.1.0",
+  "version": "2.1.1",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Currency amount conversion",
   "author": "Peer-to-peer Privacy Systems Research, LLC & BSV Association",
-  "license": "Open BSV License",
-  "main": "./out/src/index.js",
-  "types": "./out/src/index.d.ts",
+  "license": "SEE LICENSE IN LICENSE.txt",
+  "type": "commonjs",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.cts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
   "files": [
-    "out",
-    "README.md"
+    "dist",
+    "README.md",
+    "LICENSE.txt"
   ],
   "directories": {
     "test": "tests"
   },
   "scripts": {
     "test": "jest",
+    "test:property": "jest --runInBand tests/amountFormat.property.test.ts",
+    "test:coverage": "jest --coverage",
     "test:watch": "jest --watch",
-    "build": "tsc --build"
+    "build": "tsdown src/index.ts --format cjs,esm --dts --sourcemap --clean --out-dir dist --tsconfig tsconfig.build.json",
+    "format:check": "pnpm --workspace-root exec prettier --check \"packages/helpers/amountinator/{src,tests}/**/*.ts\" \"packages/helpers/amountinator/*.{cjs,json,ts}\"",
+    "lint": "oxlint src tests --deny-warnings",
+    "pack:check": "node ../../../scripts/check-package-artifact.mjs . --exports CurrencyConverter,formatAmountWithCurrency",
+    "typecheck": "tsc --project tsconfig.typecheck.json"
   },
   "repository": {
     "type": "git",
@@ -28,15 +56,19 @@
   },
   "homepage": "https://github.com/bsv-blockchain/ts-stack/tree/main/packages/helpers/amountinator#readme",
   "devDependencies": {
+    "@bsv/sdk": "workspace:^",
     "@types/jest": "^30.0.0",
+    "@types/node": "^26.1.1",
+    "fast-check": "^4.9.0",
     "jest": "^30.4.2",
-    "ts-jest": "^29.4.11",
+    "oxlint": "^1.75.0",
+    "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",
-    "typescript": "^6.0.3",
-    "@bsv/sdk": "workspace:^"
+    "tsdown": "0.22.14",
+    "typescript": "^6.0.3"
   },
   "dependencies": {
-    "@bsv/wallet-toolbox-client": "^2.3.3"
+    "@bsv/wallet-toolbox-client": "workspace:^"
   },
   "keywords": [
     "bsv",

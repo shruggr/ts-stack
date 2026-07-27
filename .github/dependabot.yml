@@ -1,71 +1,155 @@
 version: 2
+
+# One coordinated version-maintenance PR per month. This is the closest
+# supported cadence to the requested "about every three weeks", and the open
+# limit plus automatic rebasing prevents a new queue from forming behind it.
+multi-ecosystem-groups:
+  monthly-stack-maintenance:
+    schedule:
+      interval: monthly
+      time: '06:00'
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 1
+    labels:
+      - dependencies
+    commit-message:
+      prefix: chore(deps)
+    pull-request-branch-name:
+      separator: '-'
+
 updates:
   - package-ecosystem: npm
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 10
-    groups:
-      bsv-workspace:
-        # Cross-workspace @bsv/* bumps handled by sync-versions script, not Dependabot
-        exclude-patterns:
-          - "@bsv/*"
-      dev-tooling:
-        patterns:
-          - "typescript"
-          - "ts-standard"
-          - "jest"
-          - "ts-jest"
-          - "@types/*"
+    directories:
+      - /
+      - /tools/codegen/node
+    patterns:
+      - '*'
+    multi-ecosystem-group: monthly-stack-maintenance
+    rebase-strategy: auto
     ignore:
-      # Workspace packages managed internally
-      - dependency-name: "@bsv/sdk"
-      - dependency-name: "@bsv/wallet-toolbox"
-      - dependency-name: "@bsv/overlay"
-      - dependency-name: "@bsv/overlay-express"
-      - dependency-name: "@bsv/auth-express-middleware"
-      - dependency-name: "@bsv/payment-express-middleware"
-      - dependency-name: "@bsv/authsocket"
-      - dependency-name: "@bsv/authsocket-client"
-      - dependency-name: "@bsv/message-box-client"
-      - dependency-name: "@bsv/paymail"
-      - dependency-name: "@bsv/simple"
-      - dependency-name: "@bsv/wallet-helper"
-      - dependency-name: "@bsv/amountinator"
-      - dependency-name: "@bsv/templates"
-      - dependency-name: "@bsv/gasp"
-      - dependency-name: "@bsv/402-pay"
+      # First-party workspace versions are reconciled after publishing by
+      # scripts/sync-versions.mjs and the release workflow. Ownership and
+      # enforcement are recorded in projects.json#dependencyAutomation.
+      - dependency-name: '@bsv/*'
+      # TypeScript 7 currently fails the workspace build, codegen, conformance,
+      # and multiple infrastructure lanes. It is a coordinated Wave 11
+      # migration, not a routine monthly update; see the owned exception.
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
+    groups:
+      root-security:
+        applies-to: security-updates
+        patterns:
+          - '*'
+        exclude-patterns:
+          - '@bsv/*'
 
-  # Infra services each ship their own npm package-lock.json and live OUTSIDE
-  # the pnpm workspace, so the root entry above does not cover them. List each
-  # explicitly (incl. the nested notifier). @bsv/* ranges here are rewritten by
-  # the release workflow, so Dependabot ignores them.
+  # Infra services live outside the pnpm workspace and maintain package-lock
+  # files. Dependabot can update them in the same monthly PR; release-time
+  # version synchronization continues to own their @bsv/* ranges.
   - package-ecosystem: npm
     directories:
-      - "/infra/chaintracks-server"
-      - "/infra/message-box-server"
-      - "/infra/overlay-server"
-      - "/infra/uhrp-server-basic"
-      - "/infra/uhrp-server-cloud-bucket"
-      - "/infra/uhrp-server-cloud-bucket/notifier"
-      - "/infra/wab"
-      - "/infra/wallet-infra"
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 10
-    groups:
-      infra-deps:
-        patterns:
-          - "*"
-        exclude-patterns:
-          - "@bsv/*"
+      - /infra/chaintracks-server
+      - /infra/message-box-server
+      - /infra/overlay-server
+      - /infra/uhrp-server-basic
+      - /infra/uhrp-server-cloud-bucket
+      - /infra/uhrp-server-cloud-bucket/notifier
+      - /infra/wab
+      - /infra/wallet-infra
+    patterns:
+      - '*'
+    multi-ecosystem-group: monthly-stack-maintenance
+    rebase-strategy: auto
     ignore:
-      # @bsv/* ranges in infra lockfiles are managed by the release workflow
-      - dependency-name: "@bsv/*"
+      # Same release-aware first-party policy as the root workspace; see
+      # governance/repository-health/projects.json#dependencyAutomation.
+      - dependency-name: '@bsv/*'
+      # Keep every standalone service on the same coordinated compiler major
+      # as the root workspace. TypeScript 7 currently conflicts with ts-jest
+      # and is tracked as an explicit migration in issue #324.
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
+    groups:
+      infra-security:
+        applies-to: security-updates
+        patterns:
+          - '*'
+        exclude-patterns:
+          - '@bsv/*'
+
+  # Keep deployment manifests current. Runtime Dockerfiles are digest-only, so
+  # ignore their bare `node` dependency here: a digest-only Dependabot update
+  # would incorrectly resolve the registry's `latest` tag.
+  - package-ecosystem: docker
+    directories:
+      - /infra
+      - /infra/chaintracks-server
+      - /infra/message-box-server
+      - /infra/overlay-server
+      - /infra/overlay-server/deploy
+      - /infra/uhrp-server-basic
+      - /infra/uhrp-server-cloud-bucket
+      - /infra/wab
+      - /infra/wab/deploy
+      - /infra/wallet-infra
+      - /infra/wallet-infra/guides/kube_samples
+    patterns:
+      - '*'
+    multi-ecosystem-group: monthly-stack-maintenance
+    rebase-strategy: auto
+    ignore:
+      - dependency-name: node
+      # Database majors require backup/restore, upgrade-path, rollback, and
+      # application compatibility validation. Patch and minor refreshes remain
+      # automated; major migrations are tracked explicitly in issue #324.
+      - dependency-name: mysql
+        update-types:
+          - version-update:semver-major
+      - dependency-name: mongo
+        update-types:
+          - version-update:semver-major
+      # This documentation placeholder is replaced by each operator. Keep its
+      # directory monitored so the real MySQL example continues to receive
+      # digest and version updates.
+      - dependency-name: your-registry/wallet-infra
+
+  # Dependabot discovers readable Node version updates here. This file is never
+  # built; repository health requires its version, the governed digest, and all
+  # release Dockerfiles to move together before the grouped PR can merge.
+  - package-ecosystem: docker
+    directory: /governance
+    patterns:
+      - '*'
+    multi-ecosystem-group: monthly-stack-maintenance
+    rebase-strategy: auto
+    ignore:
+      # Node 24 is the owned contributor, CI, release, and container runtime.
+      # A Node major moves only as a coordinated stack migration; patch/minor
+      # image refreshes continue through this governed manifest.
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: gomod
+    directory: /tools/codegen
+    patterns:
+      - '*'
+    multi-ecosystem-group: monthly-stack-maintenance
+    rebase-strategy: auto
+
+  - package-ecosystem: uv
+    directory: /tools/codegen
+    patterns:
+      - '*'
+    multi-ecosystem-group: monthly-stack-maintenance
+    rebase-strategy: auto
 
   - package-ecosystem: github-actions
     directory: /
-    schedule:
-      interval: monthly
+    patterns:
+      - '*'
+    multi-ecosystem-group: monthly-stack-maintenance
+    rebase-strategy: auto

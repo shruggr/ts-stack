@@ -1,4 +1,4 @@
-import { expect, test, beforeEach, afterEach } from '@jest/globals'
+import { expect, jest, test, beforeEach, afterEach } from '@jest/globals'
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,41 +8,68 @@ import type { RunCommand } from '../../scaffold/base-scaffolder'
 import type { ProjectManifest } from '../../config/project-manifest'
 
 let dir: string
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'cba-uisrv-')) })
-afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'cba-uisrv-'))
+})
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true })
+})
 
 const noopRun: RunCommand = () => {}
 
 test('GET / serves the self-contained page', async () => {
-  const srv: UiServer = await startUiServer({ existing: null, targetDir: dir, deps: { runCommand: noopRun } })
+  const srv: UiServer = await startUiServer({
+    existing: null,
+    targetDir: dir,
+    deps: { runCommand: noopRun }
+  })
   try {
     const res = await fetch(srv.url)
     expect(res.status).toBe(200)
     const html = await res.text()
     expect(html).toContain('create-bsv-app')
     expect(html).toContain('window.__SCHEMA__')
-  } finally { srv.close() }
+  } finally {
+    srv.close()
+  }
 })
 
 test('GET / in new mode includes "Always included" banner', async () => {
-  const srv: UiServer = await startUiServer({ existing: null, targetDir: dir, deps: { runCommand: noopRun } })
+  const srv: UiServer = await startUiServer({
+    existing: null,
+    targetDir: dir,
+    deps: { runCommand: noopRun }
+  })
   try {
     const res = await fetch(srv.url)
     const html = await res.text()
     expect(html).toContain('Always included')
-  } finally { srv.close() }
+  } finally {
+    srv.close()
+  }
 })
 
 test('POST /generate (valid new draft) scaffolds, resolves done, and 200s', async () => {
   const calls: string[][] = []
-  const fake: RunCommand = (command, args) => { calls.push([command, ...args]) }
+  const fake: RunCommand = (command, args) => {
+    calls.push([command, ...args])
+  }
   const target = join(dir, 'app')
-  const srv: UiServer = await startUiServer({ existing: null, targetDir: target, deps: { runCommand: fake } })
+  const srv: UiServer = await startUiServer({
+    existing: null,
+    targetDir: target,
+    deps: { runCommand: fake }
+  })
   try {
     const res = await fetch(`${srv.url}/generate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: 'new', name: 'demo', frontend: 'react', capabilities: ['wallet-connect'] })
+      body: JSON.stringify({
+        mode: 'new',
+        name: 'demo',
+        frontend: 'react',
+        capabilities: ['wallet-connect']
+      })
     })
     const data = await res.json()
     expect(res.status).toBe(200)
@@ -51,20 +78,33 @@ test('POST /generate (valid new draft) scaffolds, resolves done, and 200s', asyn
     expect(existsSync(join(target, 'bsv-scaffold.json'))).toBe(true)
     const result = await srv.done
     expect(result.targetDir).toBe(target)
-  } finally { srv.close() }
+  } finally {
+    srv.close()
+  }
 })
 
 // Item 5: new-mode POST /generate with wallet-login — confirms wallet-login file is written
 test('POST /generate (new, wallet-login) scaffolds and includes useWalletLogin.tsx', async () => {
   const calls: string[][] = []
-  const fake: RunCommand = (command, args) => { calls.push([command, ...args]) }
+  const fake: RunCommand = (command, args) => {
+    calls.push([command, ...args])
+  }
   const target = join(dir, 'app2')
-  const srv: UiServer = await startUiServer({ existing: null, targetDir: target, deps: { runCommand: fake } })
+  const srv: UiServer = await startUiServer({
+    existing: null,
+    targetDir: target,
+    deps: { runCommand: fake }
+  })
   try {
     const res = await fetch(`${srv.url}/generate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: 'new', name: 'demo', frontend: 'react', capabilities: ['wallet-login'] })
+      body: JSON.stringify({
+        mode: 'new',
+        name: 'demo',
+        frontend: 'react',
+        capabilities: ['wallet-login']
+      })
     })
     const data = await res.json()
     expect(res.status).toBe(200)
@@ -76,11 +116,17 @@ test('POST /generate (new, wallet-login) scaffolds and includes useWalletLogin.t
     expect(existsSync(join(target, 'bsv-scaffold.json'))).toBe(true)
     const result = await srv.done
     expect(result.targetDir).toBe(target)
-  } finally { srv.close() }
+  } finally {
+    srv.close()
+  }
 })
 
 test('POST /generate (invalid: new with no targets) returns 400 and stays up', async () => {
-  const srv: UiServer = await startUiServer({ existing: null, targetDir: dir, deps: { runCommand: noopRun } })
+  const srv: UiServer = await startUiServer({
+    existing: null,
+    targetDir: dir,
+    deps: { runCommand: noopRun }
+  })
   const srvUrl: string = srv.url
   try {
     const res = await fetch(`${srvUrl}/generate`, {
@@ -90,9 +136,48 @@ test('POST /generate (invalid: new with no targets) returns 400 and stays up', a
     })
     expect(res.status).toBe(400)
     const data = await res.json()
-    expect(String(data.error)).toMatch(/frontend or a backend/i)
+    expect(data).toEqual({ error: 'Invalid project configuration.' })
     expect((await fetch(srvUrl)).status).toBe(200)
-  } finally { srv.close() }
+  } finally {
+    srv.close()
+  }
+})
+
+test('POST /generate does not expose unexpected command failures', async () => {
+  const internalMessage = 'secret filesystem detail from an internal stack'
+  const failingRun: RunCommand = () => {
+    throw new Error(internalMessage)
+  }
+  const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+  const srv = await startUiServer({
+    existing: null,
+    targetDir: join(dir, 'failed-app'),
+    deps: { runCommand: failingRun }
+  })
+  try {
+    const res = await fetch(`${srv.url}/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'new',
+        name: 'demo',
+        frontend: 'react',
+        capabilities: ['wallet-connect']
+      })
+    })
+    const data = await res.json()
+
+    expect(res.status).toBe(500)
+    expect(data).toEqual({ error: 'Project generation failed.' })
+    expect(JSON.stringify(data)).not.toContain(internalMessage)
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Project generation failed:',
+      expect.objectContaining({ message: internalMessage })
+    )
+  } finally {
+    srv.close()
+    errorSpy.mockRestore()
+  }
 })
 
 test('runUi opens the browser then resolves after the simulated submit', async () => {
@@ -105,7 +190,12 @@ test('runUi opens the browser then resolves after the simulated submit', async (
       void fetch(`${url}/generate`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ mode: 'new', name: 'demo', frontend: 'react', capabilities: ['wallet-connect'] })
+        body: JSON.stringify({
+          mode: 'new',
+          name: 'demo',
+          frontend: 'react',
+          capabilities: ['wallet-connect']
+        })
       })
     }
   })
@@ -120,7 +210,12 @@ test('POST /plan returns the real BSV files create-bsv-app would write (new mode
     const res = await fetch(srvUrl + '/plan', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: 'new', name: 'demo', frontend: 'react', capabilities: ['wallet-login'] })
+      body: JSON.stringify({
+        mode: 'new',
+        name: 'demo',
+        frontend: 'react',
+        capabilities: ['wallet-login']
+      })
     })
     expect(res.status).toBe(200)
     const data = await res.json()
@@ -129,7 +224,9 @@ test('POST /plan returns the real BSV files create-bsv-app would write (new mode
     expect(paths).toContain('src/bsv/WalletContext.tsx')
     expect(paths).toContain('AGENTS.md')
     expect(data.files.every((f: { status: string }) => f.status === 'new')).toBe(true)
-  } finally { srv.close() }
+  } finally {
+    srv.close()
+  }
 })
 
 test('POST /plan marks an existing file as edit', async () => {
@@ -141,12 +238,19 @@ test('POST /plan marks an existing file as edit', async () => {
     const res = await fetch(srvUrl + '/plan', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: 'new', name: 'demo', frontend: 'react', capabilities: ['wallet-login'] })
+      body: JSON.stringify({
+        mode: 'new',
+        name: 'demo',
+        frontend: 'react',
+        capabilities: ['wallet-login']
+      })
     })
     const data = await res.json()
     const auth = data.files.find((f: { path: string }) => f.path === 'src/bsv/auth.ts')
     expect(auth.status).toBe('edit')
-  } finally { srv.close() }
+  } finally {
+    srv.close()
+  }
 })
 
 test('POST /plan returns { files: [], error } for an invalid draft', async () => {
@@ -162,7 +266,33 @@ test('POST /plan returns { files: [], error } for an invalid draft', async () =>
     const data = await res.json()
     expect(data.files).toEqual([])
     expect(typeof data.error).toBe('string')
-  } finally { srv.close() }
+  } finally {
+    srv.close()
+  }
+})
+
+test('POST /plan does not expose unexpected parser details', async () => {
+  const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+  const srv = await startUiServer({ existing: null, targetDir: dir, deps: { runCommand: noopRun } })
+  try {
+    const res = await fetch(`${srv.url}/plan`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{'
+    })
+    const data = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(data).toEqual({ files: [], error: 'Unable to generate project plan.' })
+    expect(JSON.stringify(data)).not.toMatch(/JSON|position|stack/i)
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Project plan generation failed:',
+      expect.any(SyntaxError)
+    )
+  } finally {
+    srv.close()
+    errorSpy.mockRestore()
+  }
 })
 
 test('POST /generate add-mode does NOT overwrite existing capability files (force=false)', async () => {
@@ -186,5 +316,7 @@ test('POST /generate add-mode does NOT overwrite existing capability files (forc
     })
     expect(res.status).toBe(200)
     expect(readFileSync(join(dir, 'src', 'bsv', 'auth.ts'), 'utf8')).toBe('// SENTINEL')
-  } finally { srv.close() }
+  } finally {
+    srv.close()
+  }
 })

@@ -19,14 +19,16 @@
  * Safe to run repeatedly (idempotent). Does not touch non-workspace deps.
  */
 
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execSync } from 'node:child_process'
+import { readUtf8FileIfExists, writeUtf8FileAtomic } from './file-system.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
 const DRY_RUN = process.argv.includes('--dry-run')
+const WORKSPACE_ONLY = process.argv.includes('--workspace-only')
 
 // --- 1. Collect all workspace package.json paths ---
 const output = execSync('pnpm -r ls --json --depth 0', { cwd: ROOT }).toString()
@@ -38,6 +40,36 @@ for (const pkg of pkgList) {
   if (pkg.name && pkg.version && pkg.path) {
     workspaceMap[pkg.name] = { version: pkg.version, path: pkg.path }
   }
+}
+
+function parseVersion(version) {
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)/)
+  if (!match) return null
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3])
+  }
+}
+
+function compareVersion(a, b) {
+  return a.major - b.major || a.minor - b.minor || a.patch - b.patch
+}
+
+function caretUpperBound(version) {
+  if (version.major > 0) return { major: version.major + 1, minor: 0, patch: 0 }
+  if (version.minor > 0) return { major: 0, minor: version.minor + 1, patch: 0 }
+  return { major: 0, minor: 0, patch: version.patch + 1 }
+}
+
+function acceptsPeerVersion(range, wsVersion) {
+  if (!range.startsWith('^')) return false
+  const minimum = parseVersion(range.slice(1))
+  const current = parseVersion(wsVersion)
+  if (!minimum || !current) return false
+  return (
+    compareVersion(current, minimum) >= 0 && compareVersion(current, caretUpperBound(minimum)) < 0
+  )
 }
 
 console.log(`Found ${Object.keys(workspaceMap).length} workspace packages`)
@@ -57,23 +89,24 @@ for (const [, { path: pkgPath }] of Object.entries(workspaceMap)) {
   const pkg = JSON.parse(raw)
   let changed = false
 
-  for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+  for (const field of [
+    'dependencies',
+    'devDependencies',
+    'peerDependencies',
+    'optionalDependencies'
+  ]) {
     if (!pkg[field]) continue
     for (const [dep, range] of Object.entries(pkg[field])) {
       const ws = workspaceMap[dep]
       if (!ws) continue
-      const target = `^${ws.version}`
-      // `workspace:^` is the canonical form for cross-workspace deps in this repo —
-      // publishes as `^X.Y.Z` so downstream installs dedupe. `workspace:*` publishes
-      // as an exact pin and causes duplicate-install bugs; rewrite it to `workspace:^`.
-      if (range === 'workspace:*') {
-        console.log(`  ${pkg.name}: ${dep} workspace:* → workspace:^`)
-        pkg[field][dep] = 'workspace:^'
-        changed = true
-        totalChanges++
-        continue
-      }
-      if (range !== target && range !== 'workspace:^') {
+      // Runtime, development, and optional workspace edges must link to the
+      // local package. pnpm rewrites workspace:^ to ^X.Y.Z during publish.
+      // Peer ranges remain ordinary semver because they express the public
+      // compatibility contract rather than an installation edge.
+      const target = field === 'peerDependencies' ? `^${ws.version}` : 'workspace:^'
+      const valid =
+        field === 'peerDependencies' ? acceptsPeerVersion(range, ws.version) : range === target
+      if (!valid) {
         console.log(`  ${pkg.name}: ${dep} ${range} → ${target}`)
         pkg[field][dep] = target
         changed = true
@@ -83,11 +116,13 @@ for (const [, { path: pkgPath }] of Object.entries(workspaceMap)) {
   }
 
   if (changed && !DRY_RUN) {
-    writeFileSync(jsonPath, JSON.stringify(pkg, null, 2) + '\n')
+    writeUtf8FileAtomic(jsonPath, JSON.stringify(pkg, null, 2) + '\n')
   }
 }
 
-console.log(`\n${DRY_RUN ? '[DRY RUN] Would update' : 'Updated'} ${totalChanges} cross-package references`)
+console.log(
+  `\n${DRY_RUN ? '[DRY RUN] Would update' : 'Updated'} ${totalChanges} cross-package references`
+)
 
 // --- 3. Sync ./infra/* (not part of pnpm workspace) ---
 //
@@ -104,15 +139,15 @@ let infraBumps = 0
 // regex so we can't accidentally hit catastrophic backtracking (and don't trip
 // SonarCloud's typescript:S5852 "super-linear regex" rule) on a degenerate
 // version string. Linear scan, capped length.
-const isAsciiDigit = (code) => code >= 48 && code <= 57
-const allDigits = (s) => {
+const isAsciiDigit = code => code >= 48 && code <= 57
+const allDigits = s => {
   if (s.length === 0) return false
   for (let i = 0; i < s.length; i++) {
     if (!isAsciiDigit(s.codePointAt(i))) return false
   }
   return true
 }
-const bumpPatch = (version) => {
+const bumpPatch = version => {
   if (typeof version !== 'string' || version.length === 0 || version.length > 64) return null
 
   const dot1 = version.indexOf('.')
@@ -136,19 +171,30 @@ const bumpPatch = (version) => {
   return `${major}.${minor}.${patch + 1}${suffix}`
 }
 
-if (existsSync(INFRA_DIR)) {
-  const entries = readdirSync(INFRA_DIR)
+if (!WORKSPACE_ONLY) {
+  let entries = []
+  try {
+    entries = readdirSync(INFRA_DIR, { withFileTypes: true })
+  } catch (error) {
+    const missing =
+      typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
+    if (!missing) throw error
+  }
   for (const entry of entries) {
-    const componentDir = join(INFRA_DIR, entry)
-    if (!statSync(componentDir).isDirectory()) continue
+    if (!entry.isDirectory()) continue
+    const componentDir = join(INFRA_DIR, entry.name)
     const jsonPath = join(componentDir, 'package.json')
-    if (!existsSync(jsonPath)) continue
-
-    const raw = readFileSync(jsonPath, 'utf-8')
+    const raw = readUtf8FileIfExists(jsonPath)
+    if (raw === undefined) continue
     const pkg = JSON.parse(raw)
     let changed = false
 
-    for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    for (const field of [
+      'dependencies',
+      'devDependencies',
+      'peerDependencies',
+      'optionalDependencies'
+    ]) {
       if (!pkg[field]) continue
       for (const [dep, range] of Object.entries(pkg[field])) {
         const ws = workspaceMap[dep]
@@ -171,10 +217,12 @@ if (existsSync(INFRA_DIR)) {
         infraBumps++
       }
       if (!DRY_RUN) {
-        writeFileSync(jsonPath, JSON.stringify(pkg, null, 2) + '\n')
+        writeUtf8FileAtomic(jsonPath, JSON.stringify(pkg, null, 2) + '\n')
       }
     }
   }
 }
 
-console.log(`${DRY_RUN ? '[DRY RUN] Would update' : 'Updated'} ${infraDepChanges} infra dep reference(s) across ${infraBumps} component(s)`)
+console.log(
+  `${DRY_RUN ? '[DRY RUN] Would update' : 'Updated'} ${infraDepChanges} infra dep reference(s) across ${infraBumps} component(s)`
+)

@@ -1,24 +1,55 @@
 {
   "name": "@bsv/wallet-relay",
-  "version": "0.2.1",
+  "version": "0.2.2",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "BSV mobile wallet relay — relay server and pairing client",
+  "author": "BSV Blockchain Association",
+  "keywords": [
+    "bsv",
+    "wallet",
+    "relay",
+    "mobile",
+    "pairing"
+  ],
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./client": {
-      "types": "./dist/client.d.ts",
-      "import": "./dist/client.js",
-      "require": "./dist/client.cjs"
+      "import": {
+        "types": "./dist/client.d.ts",
+        "default": "./dist/client.js"
+      },
+      "require": {
+        "types": "./dist/client.d.cts",
+        "default": "./dist/client.cjs"
+      }
     },
     "./react": {
-      "types": "./dist/react.d.ts",
-      "import": "./dist/react.js",
-      "require": "./dist/react.cjs"
-    }
+      "import": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      },
+      "require": {
+        "types": "./dist/react.d.cts",
+        "default": "./dist/react.cjs"
+      }
+    },
+    "./package.json": "./package.json"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -29,20 +60,28 @@
   "files": [
     "dist",
     "bin",
-    "template"
+    "template",
+    "README.md",
+    "LICENSE.txt"
   ],
   "scripts": {
-    "build": "tsup && tsc -p tsconfig.build.json --emitDeclarationOnly",
-    "dev": "tsup --watch",
+    "build": "node build.mjs && tsc -p tsconfig.build.json --emitDeclarationOnly && node scripts/copy-cjs-types.mjs",
+    "dev": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test": "jest --config jest.config.cjs"
+    "format:check": "pnpm --workspace-root exec prettier --check \"packages/wallet/ts-wallet-relay/**/*.{cjs,js,json,md,mjs,ts,tsx}\"",
+    "lint": "oxlint build.mjs bin src tests --deny-warnings",
+    "pack:check": "pnpm build && node ../../../scripts/check-package-artifact.mjs . --allow-source-prefixes template --consumer-dependencies react --exports QRSessionManager,WalletRelayService,WalletRequestHandler,WebSocketRelay,compileOriginMatcher --entry-exports \"./client=WalletPairingSession|WalletRelayClient|WalletRelayError;./react=QRDisplay|QRPairingCode|RequestLog|WalletConnectionModal|useQRPairing|useWalletRelayClient\" --bin wallet-relay --bin-args --help",
+    "test": "jest --config jest.config.cjs --watchman=false",
+    "test:browser": "pnpm build && node ../../../scripts/check-browser-package.mjs .",
+    "test:coverage": "jest --config jest.config.cjs --coverage --watchman=false",
+    "test:property": "jest --config jest.config.cjs --selectProjects node --runInBand --watchman=false --runTestsByPath tests/pairingUri.property.test.ts",
+    "prepublishOnly": "pnpm build"
   },
   "peerDependencies": {
     "@bsv/sdk": "^2.1.6",
     "express": ">=4.0.0",
     "qrcode": ">=1.5.0",
-    "react": ">=17.0.0",
-    "ws": ">=8.0.0"
+    "react": ">=17.0.0"
   },
   "peerDependenciesMeta": {
     "express": {
@@ -54,33 +93,35 @@
     "react": {
       "optional": true
     },
-    "ws": {
-      "optional": true
-    },
     "@bsv/sdk": {
       "optional": false
     }
   },
   "devDependencies": {
     "@bsv/sdk": "workspace:^",
-    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
-    "@types/express": "^5.0.0",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
-    "@types/node": "^26.0.0",
-    "@types/qrcode": "^1.5.0",
+    "@types/node": "^26.1.1",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.17",
-    "@types/ws": "^8.5.0",
+    "@types/ws": "^8.18.1",
     "express": "^5.2.1",
+    "fast-check": "^4.9.0",
     "jest": "^30.4.2",
     "jest-environment-jsdom": "^30.4.1",
-    "qrcode": "^1.5.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "ts-jest": "^29.4.11",
-    "tsup": "^8.0.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "ts-jest": "^29.4.12",
+    "esbuild": "^0.28.1",
     "typescript": "^6.0.3",
-    "ws": "^8.21.0"
+    "oxlint": "^1.75.0"
+  },
+  "dependencies": {
+    "ws": "^8.21.1"
   },
   "repository": {
     "type": "git",
@@ -90,5 +131,19 @@
   "bugs": {
     "url": "https://github.com/bsv-blockchain/ts-stack/issues"
   },
-  "homepage": "https://github.com/bsv-blockchain/ts-stack/tree/main/packages/wallet/ts-wallet-relay#readme"
+  "homepage": "https://github.com/bsv-blockchain/ts-stack/tree/main/packages/wallet/ts-wallet-relay#readme",
+  "license": "SEE LICENSE IN LICENSE.txt",
+  "typesVersions": {
+    "*": {
+      "client": [
+        "dist/client.d.ts"
+      ],
+      "react": [
+        "dist/react.d.ts"
+      ],
+      "*": [
+        "dist/index.d.ts"
+      ]
+    }
+  }
 }

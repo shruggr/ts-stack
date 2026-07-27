@@ -1,4 +1,4 @@
-import SHIPCast from '../../overlay-tools/SHIPBroadcaster'
+import SHIPCast, { HTTPSOverlayBroadcastFacilitator } from '../../overlay-tools/SHIPBroadcaster'
 import LookupResolver from '../../overlay-tools/LookupResolver'
 import { PrivateKey } from '../../primitives/index'
 import { Transaction } from '../../transaction/index'
@@ -24,6 +24,61 @@ describe('SHIPCast', () => {
 
   afterEach(() => {
     consoleErrorSpy.mockRestore()
+  })
+
+  it('uses the configured HTTP client and canonical comma-separated X-Topics header', async () => {
+    const httpClient = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ tm_foo: { outputsToAdmit: [], coinsToRetain: [] } })
+    })
+    const facilitator = new HTTPSOverlayBroadcastFacilitator(httpClient as unknown as typeof fetch)
+
+    await facilitator.send('https://overlay.example', {
+      beef: [1, 2, 3],
+      topics: ['tm_foo', 'tm_bar']
+    })
+
+    expect(httpClient).toHaveBeenCalledWith(
+      'https://overlay.example/submit',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'X-Topics': 'tm_foo,tm_bar'
+        },
+        body: new Uint8Array([1, 2, 3])
+      })
+    )
+  })
+
+  it('rejects insecure facilitator URLs unless HTTP is explicitly enabled', async () => {
+    const httpClient = jest.fn()
+    const facilitator = new HTTPSOverlayBroadcastFacilitator(
+      httpClient as unknown as typeof fetch
+    )
+
+    await expect(
+      facilitator.send('http://overlay.example', {
+        beef: [1, 2, 3],
+        topics: ['tm_foo']
+      })
+    ).rejects.toThrow('HTTPS facilitator can only use URLs that start with "https:"')
+    expect(httpClient).not.toHaveBeenCalled()
+  })
+
+  it('reports the all-host acknowledgment failure directly', () => {
+    const broadcaster = new SHIPCast(['tm_foo'], {
+      requireAcknowledgmentFromAllHostsForTopics: 'all'
+    })
+    expect(
+      (broadcaster as any).checkAllHostsRequirement({
+        'https://overlay.example': new Set()
+      })
+    ).toEqual({
+      status: 'error',
+      code: 'ERR_REQUIRE_ACK_FROM_ALL_HOSTS_FAILED',
+      description: 'Not all hosts acknowledged the required topics.'
+    })
   })
 
   it('Handles constructor errors', () => {
@@ -367,6 +422,7 @@ describe('SHIPCast', () => {
     })
 
     expect(mockFacilitator.send).toHaveBeenCalled()
+    expect(consoleErrorSpy).not.toHaveBeenCalled()
   })
 
   it('should fail when required specific hosts are not among interested hosts', async () => {
@@ -434,7 +490,7 @@ describe('SHIPCast', () => {
     })
   })
 
-  it('should succeed when all hosts acknowledge all topics (default behavior)', async () => {
+  it('should succeed quietly when one host fails and another acknowledges all topics', async () => {
     const shipHostKey1 = new PrivateKey(42)
     const shipWallet1 = new CompletedProtoWallet(shipHostKey1)
     const shipLib1 = new OverlayAdminTokenTemplate(shipWallet1)
@@ -504,8 +560,11 @@ describe('SHIPCast', () => {
       ]
     })
 
-    // Both hosts acknowledge all topics
+    // One interested host fails while the other acknowledges all topics.
     mockFacilitator.send.mockImplementation(async (host, { topics }) => {
+      if (host === 'https://shiphost1.com') {
+        throw new Error('Host failed')
+      }
       const steak = {}
       for (const topic of topics) {
         steak[topic] = {
@@ -526,7 +585,7 @@ describe('SHIPCast', () => {
     expect(response).toEqual({
       status: 'success',
       txid: testTx.id('hex'),
-      message: 'Sent to 2 Overlay Services hosts.'
+      message: 'Sent to 1 Overlay Services host.'
     })
 
     expect(mockResolver.query).toHaveBeenCalledWith(
@@ -540,6 +599,7 @@ describe('SHIPCast', () => {
     )
 
     expect(mockFacilitator.send).toHaveBeenCalledTimes(2)
+    expect(consoleErrorSpy).not.toHaveBeenCalled()
   })
 
   it('should fail if at least one host does not acknowledge every topic (default behavior)', async () => {

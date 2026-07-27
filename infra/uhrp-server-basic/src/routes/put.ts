@@ -1,16 +1,23 @@
 import createUHRPAdvertisement from '../utils/createUHRPAdvertisement';
 import { Request, Response } from 'express';
-import { Hash, StorageUtils, Utils } from '@bsv/sdk';
-import fs from 'fs'
+import { Utils } from '@bsv/sdk';
 import { getWallet } from '../utils/walletSingleton';
-import path from 'path';
-import bodyparser from 'body-parser';
 import { IncomingHttpHeaders } from 'http';
 import { log } from '../logger';
+import {
+  resolveCdnObjectPath,
+  writeCdnObjectStreamExclusive
+} from '../utils/cdnObjectPath';
+import { readBodyLimitBytes } from '../security/edgePolicy';
 
 const {
   HOSTING_DOMAIN
 } = process.env
+
+const MAX_UPLOAD_BYTES = readBodyLimitBytes(
+  'UHRP_UPLOAD',
+  64 * 1024 * 1024
+)
 
 interface AdvertiseRequest extends Request {
   query: {
@@ -22,7 +29,6 @@ interface AdvertiseRequest extends Request {
     hmac: string
   },
   headers: IncomingHttpHeaders
-  body: Uint8Array
 }
 
 interface AdvertiseResponse {
@@ -31,36 +37,123 @@ interface AdvertiseResponse {
   description?: string;
 }
 
-const advertiseHandler = async (req: AdvertiseRequest, res: Response<AdvertiseResponse>) => {
-  const wallet = await getWallet()
+function drainRequest(req: Request): void {
+  if (typeof req.resume === 'function') req.resume()
+}
 
-  // Verify size
-  if (Number(req.query.fileSize) !== req.body.byteLength) {
+const advertiseHandler = async (req: AdvertiseRequest, res: Response<AdvertiseResponse>) => {
+  const objectID = req.query.objectID
+  if (resolveCdnObjectPath(objectID) === null) {
+    drainRequest(req)
     return res.status(400).json({
       status: 'error',
-      description: 'Size mismatch'
+      code: 'ERR_INVALID_OBJECT_ID',
+      description: 'Invalid object identifier'
     })
   }
 
-  // Verify hmac
-  const str = `fileSize=${req.query.fileSize}&objectID=${req.query.objectID}&expiry=${req.query.expiry}&uploader=${req.query.uploader}`
-    const { valid } = await wallet.verifyHmac({
+  const fileSize = Number(req.query.fileSize)
+  const expiryMilliseconds = Date.parse(req.query.expiry)
+  if (
+    !/^\d+$/.test(req.query.fileSize) ||
+    !Number.isSafeInteger(fileSize) ||
+    fileSize < 0 ||
+    !Number.isFinite(expiryMilliseconds) ||
+    expiryMilliseconds <= Date.now()
+  ) {
+    drainRequest(req)
+    return res.status(400).json({
+      status: 'error',
+      code: 'ERR_INVALID_UPLOAD_METADATA',
+      description: 'Invalid upload metadata'
+    })
+  }
+  if (fileSize > MAX_UPLOAD_BYTES) {
+    drainRequest(req)
+    return res.status(413).json({
+      status: 'error',
+      code: 'ERR_BODY_TOO_LARGE',
+      description: 'The upload exceeds the endpoint limit.'
+    })
+  }
+
+  const contentLength = req.headers['content-length']
+  if (
+    typeof contentLength === 'string' &&
+    (!/^\d+$/.test(contentLength) || Number(contentLength) !== fileSize)
+  ) {
+    drainRequest(req)
+    return res.status(400).json({
+      status: 'error',
+      code: 'ERR_SIZE_MISMATCH',
+      description: 'Upload size does not match the authorization.'
+    })
+  }
+
+  const wallet = await getWallet()
+
+  // Verify authorization before consuming or storing the potentially large body.
+  const str = `fileSize=${req.query.fileSize}&objectID=${objectID}&expiry=${req.query.expiry}&uploader=${req.query.uploader}`
+  let valid = false
+  try {
+    const result = await wallet.verifyHmac({
       protocolID: [2, 'storage upload'],
       keyID: '1',
       data: Utils.toArray(str, 'utf8'),
       hmac: Utils.toArray(req.query.hmac, 'hex')
     })
-
-  // Verify no file exists with the same object ID
-  if (fs.existsSync(path.join(__dirname, `../../public/cdn/${req.query.objectID}`))) {
-    return res.status(400).json({
+    valid = result.valid
+  } catch {
+    valid = false
+  }
+  if (!valid) {
+    drainRequest(req)
+    return res.status(401).json({
       status: 'error',
-      description: 'File exists'
+      code: 'ERR_INVALID_HMAC',
+      description: 'Invalid upload authorization'
     })
   }
 
-  // Write file
-  fs.writeFileSync(path.join(__dirname, `../../public/cdn/${req.query.objectID}`), req.body)
+  // Stream to a private temporary file, hash incrementally, and atomically
+  // create the public object without ever overwriting an existing path.
+  const writeResult = await writeCdnObjectStreamExclusive(
+    objectID,
+    req,
+    fileSize,
+    MAX_UPLOAD_BYTES
+  )
+  if (writeResult.status === 'exists') {
+    return res.status(400).json({
+      status: 'error',
+      code: 'ERR_OBJECT_EXISTS',
+      description: 'File exists'
+    })
+  }
+  if (writeResult.status === 'invalid') {
+    return res.status(400).json({
+      status: 'error',
+      code: 'ERR_INVALID_OBJECT_ID',
+      description: 'Invalid object identifier'
+    })
+  }
+  if (writeResult.status === 'too_large') {
+    return res.status(413).json({
+      status: 'error',
+      code: 'ERR_BODY_TOO_LARGE',
+      description: 'The upload exceeds the endpoint limit.'
+    })
+  }
+  if (writeResult.status === 'size_mismatch') {
+    return res.status(400).json({
+      status: 'error',
+      code: 'ERR_SIZE_MISMATCH',
+      description: 'Upload size does not match the authorization.'
+    })
+  }
+  if (writeResult.status !== 'stored') {
+    throw new Error('Unexpected object stream result')
+  }
 
   // Create UHRP ad under /cdn
   try {
@@ -70,12 +163,12 @@ const advertiseHandler = async (req: AdvertiseRequest, res: Response<AdvertiseRe
     }
     const expiryTime = Math.floor(new Date(req.query.expiry).getTime() / 1000)
     await createUHRPAdvertisement({
-      hash: Hash.sha256(Array.from(req.body)),
-      objectIdentifier: req.query.objectID,
-      url: `https://${HOSTING_DOMAIN}/cdn/${req.query.objectID}`,
+      hash: writeResult.hash,
+      objectIdentifier: objectID,
+      url: `https://${HOSTING_DOMAIN}/cdn/${objectID}`,
       uploaderIdentityKey: req.query.uploader,
       expiryTime,
-      contentLength: req.body.byteLength,
+      contentLength: writeResult.byteLength,
       contentType: req.headers['content-type'] || 'application/octet-stream'
     })
     res.status(200).json({ status: 'success' })

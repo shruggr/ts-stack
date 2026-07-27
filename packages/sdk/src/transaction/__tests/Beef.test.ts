@@ -3,6 +3,7 @@ import BeefParty from '../../transaction/BeefParty'
 import { Beef, BEEF_V1, BEEF_V2 } from '../../transaction/Beef'
 import Transaction from '../../transaction/Transaction'
 import { fromBase58 } from '../../primitives/utils'
+import Script from '../../script/Script'
 
 // The following imports allow full type checking by the VsCode editor, but tests will fail to run:
 /*
@@ -324,6 +325,22 @@ describe('Beef tests', () => {
     }
   })
 
+  test('6a_BeefParty safely tracks object prototype property names', () => {
+    const bp = new BeefParty(['__proto__', 'constructor'])
+
+    bp.addKnownTxidsForParty('__proto__', ['__proto__', 'constructor'])
+    bp.addKnownTxidsForParty('constructor', ['prototype'])
+
+    expect(bp.isParty('__proto__')).toBe(true)
+    expect(bp.isParty('constructor')).toBe(true)
+    expect(bp.isParty('toString')).toBe(false)
+    expect(bp.getKnownTxidsForParty('__proto__')).toEqual(['__proto__', 'constructor'])
+    expect(bp.getKnownTxidsForParty('constructor')).toEqual(['prototype'])
+    expect(Object.getPrototypeOf(bp.knownTo)).toBeNull()
+    expect(Object.getPrototypeOf(bp.knownTo.__proto__)).toBeNull()
+    expect((Object.prototype as Record<string, unknown>).prototype).toBeUndefined()
+  })
+
   test('6b_trimKnownTxids_removes_unreferenced_bumps', async () => {
     // Create a beef with multiple transactions and bumps
     const beef = Beef.fromString(beefs[0])
@@ -468,6 +485,19 @@ describe('Beef tests', () => {
     expect(atomic).toEqual(beef2)
     const atomic2 = beef.toUint8ArrayAtomic(tx.id('hex'))
     expect(atomic).toEqual(Array.from(atomic2))
+
+    const cached = beef.toUint8ArrayAtomic(tx.id('hex'))
+    expect(cached).toBe(atomic2)
+
+    beef.mergeTxidOnly('11'.repeat(32))
+    const afterMutation = beef.toUint8ArrayAtomic(tx.id('hex'))
+    expect(afterMutation).not.toBe(cached)
+    expect(afterMutation).toEqual(cached)
+
+    tx.addOutput({ satoshis: 1, lockingScript: Script.fromASM('OP_TRUE') })
+    const afterNestedMutation = beef.toUint8ArrayAtomic(tx.id('hex'))
+    expect(afterNestedMutation).not.toBe(afterMutation)
+    expect(afterNestedMutation).not.toEqual(afterMutation)
   })
   test('9_sortTxs', async () => {
     {

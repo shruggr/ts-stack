@@ -36,7 +36,7 @@ import { asArray, asString } from '../../utility/utilityHelpers.noBuffer'
 import { WalletError } from '../../sdk/WalletError'
 import { classifyReqStatus } from '../storageProviderHelpers'
 
-export async function processAction (
+export async function processAction(
   storage: StorageProvider,
   auth: AuthId,
   args: StorageProcessActionArgs
@@ -95,6 +95,8 @@ export interface GetReqsAndBeefDetail {
 export interface GetReqsAndBeefResult {
   beef: Beef
   details: GetReqsAndBeefDetail[]
+  /** Internal fast path: this exact BEEF instance already passed validation. */
+  verified?: boolean
 }
 
 export interface PostBeefResultForTxidApi {
@@ -128,7 +130,7 @@ export interface PostBeefResultForTxidApi {
  * @param isDelayed
  * @param r Optional. Ignores txids and allows ProvenTxReqs and merged beef to be passed in.
  */
-function classifyReqDetails (
+function classifyReqDetails(
   details: GetReqsAndBeefDetail[],
   swr: SendWithResult[],
   readyToSendReqs: EntityProvenTxReq[]
@@ -145,13 +147,13 @@ function classifyReqDetails (
   }
 }
 
-async function verifyMergedBeef (
+async function verifyMergedBeef(
   storage: StorageProvider,
   r: GetReqsAndBeefResult,
   readyToSendReqs: EntityProvenTxReq[],
   logger?: WalletLoggerInterface
 ): Promise<void> {
-  if (readyToSendReqs.length === 0) return
+  if (readyToSendReqs.length === 0 || r.verified === true) return
   const beefIsValid = await r.beef.verify(await storage.getServices().getChainTracker())
   if (!beefIsValid) {
     logger?.error(`VERIFY FALSE BEEF: ${r.beef.toLogString()}`)
@@ -160,10 +162,7 @@ async function verifyMergedBeef (
   logger?.log('beef is valid')
 }
 
-async function getReqDetailsForDelayedShare (
-  storage: StorageProvider,
-  txids: string[]
-): Promise<GetReqsAndBeefResult> {
+async function getReqDetailsForDelayedShare(storage: StorageProvider, txids: string[]): Promise<GetReqsAndBeefResult> {
   const r: GetReqsAndBeefResult = {
     beef: new Beef(),
     details: []
@@ -198,18 +197,18 @@ async function getReqDetailsForDelayedShare (
   return r
 }
 
-export async function shareReqsWithWorld (
+export async function shareReqsWithWorld(
   storage: StorageProvider,
   userId: number,
   txids: string[],
   isDelayed: boolean,
   r?: GetReqsAndBeefResult,
   logger?: WalletLoggerInterface
-): Promise<{ swr: SendWithResult[], ndr: ReviewActionResult[] | undefined }> {
+): Promise<{ swr: SendWithResult[]; ndr: ReviewActionResult[] | undefined }> {
   const swr: SendWithResult[] = []
   const ndr: ReviewActionResult[] | undefined = undefined
 
-  if ((r == null) && txids.length < 1) return { swr, ndr }
+  if (r == null && txids.length < 1) return { swr, ndr }
 
   r ||= isDelayed
     ? await getReqDetailsForDelayedShare(storage, txids)
@@ -253,11 +252,13 @@ interface ReqTxStatus {
   tx: TransactionStatus
 }
 
-function determineReqTxStatus (
-  params: Pick<StorageProcessActionArgs, 'isNoSend' | 'isSendWith' | 'isDelayed'>
-): { status: ReqTxStatus, postStatus: ReqTxStatus | undefined } {
+function determineReqTxStatus(params: Pick<StorageProcessActionArgs, 'isNoSend' | 'isSendWith' | 'isDelayed'>): {
+  status: ReqTxStatus
+  postStatus: ReqTxStatus | undefined
+} {
   if (params.isNoSend && !params.isSendWith) return { status: { req: 'nosend', tx: 'nosend' }, postStatus: undefined }
-  if (!params.isNoSend && params.isDelayed) return { status: { req: 'unsent', tx: 'unprocessed' }, postStatus: undefined }
+  if (!params.isNoSend && params.isDelayed)
+    return { status: { req: 'unsent', tx: 'unprocessed' }, postStatus: undefined }
   if (!params.isNoSend && !params.isDelayed) {
     return {
       status: { req: 'unprocessed', tx: 'unprocessed' },
@@ -267,16 +268,12 @@ function determineReqTxStatus (
   throw new WERR_INTERNAL('logic error')
 }
 
-function buildOutputUpdates (
-  storage: StorageProvider,
-  tx: BsvTransaction,
-  vargs: ValidCommitNewTxToStorageArgs
-): void {
+function buildOutputUpdates(storage: StorageProvider, tx: BsvTransaction, vargs: ValidCommitNewTxToStorageArgs): void {
   for (const o of vargs.outputOutputs) {
     const vout = verifyInteger(o.vout)
     const offset = vargs.txScriptOffsets.outputs[vout]
     const rawTxScript = asString(vargs.rawTx.slice(offset.offset, offset.offset + offset.length))
-    if ((o.lockingScript != null) && rawTxScript !== asString(o.lockingScript)) {
+    if (o.lockingScript != null && rawTxScript !== asString(o.lockingScript)) {
       throw new WERR_INVALID_OPERATION(
         `rawTx output locking script for vout ${vout} not equal to expected output script.`
       )
@@ -294,7 +291,9 @@ function buildOutputUpdates (
     }
     if (offset.length > storage.getSettings().maxOutputScript)
     // Remove long lockingScript data from outputs table, will be read from rawTx in proven_tx or proven_tx_reqs tables.
-    { update.lockingScript = undefined }
+    {
+      update.lockingScript = undefined
+    }
     vargs.outputUpdates.push({ id: o.outputId, update })
   }
 }
@@ -322,25 +321,29 @@ interface ValidCommitNewTxToStorageArgs {
   beef: Beef
 
   req: EntityProvenTxReq
-  outputUpdates: Array<{ id: number, update: Partial<TableOutput> }>
+  outputUpdates: Array<{ id: number; update: Partial<TableOutput> }>
   transactionUpdate: Partial<TableTransaction>
   postStatus?: ReqTxStatus
 }
 
-async function validateCommitNewTxToStorageArgs (
+async function validateCommitNewTxToStorageArgs(
   storage: StorageProvider,
   userId: number,
   params: StorageProcessActionArgs
 ): Promise<ValidCommitNewTxToStorageArgs> {
-  if (!params.reference || !params.txid || (params.rawTx == null)) { throw new WERR_INVALID_OPERATION('One or more expected params are undefined.') }
+  if (!params.reference || !params.txid || params.rawTx == null) {
+    throw new WERR_INVALID_OPERATION('One or more expected params are undefined.')
+  }
   const rawTx = asArray(params.rawTx)
   let tx: BsvTransaction
   try {
     tx = BsvTransaction.fromBinary(rawTx)
-  } catch (_parseError: unknown) {
+  } catch {
     throw new WERR_INVALID_OPERATION('Parsing serialized transaction failed.')
   }
-  if (params.txid !== tx.id('hex')) { throw new WERR_INVALID_OPERATION('Hash of serialized transaction doesn\'t match expected txid') }
+  if (params.txid !== tx.id('hex')) {
+    throw new WERR_INVALID_OPERATION("Hash of serialized transaction doesn't match expected txid")
+  }
   const services = storage.getServices()
   if (!(await services.nLockTimeIsFinal(tx))) {
     throw new WERR_INVALID_OPERATION(`This transaction is not final.
@@ -358,7 +361,9 @@ async function validateCommitNewTxToStorageArgs (
   const beef = Beef.fromBinary(asArray(transaction.inputBEEF))
   // Could check beef validates transaction inputs...
   // Transaction must have unsigned or unprocessed status
-  if (transaction.status !== 'unsigned' && transaction.status !== 'unprocessed') { throw new WERR_INVALID_OPERATION(`invalid transaction status ${transaction.status}`) }
+  if (transaction.status !== 'unsigned' && transaction.status !== 'unprocessed') {
+    throw new WERR_INVALID_OPERATION(`invalid transaction status ${transaction.status}`)
+  }
   const transactionId = verifyId(transaction.transactionId)
   const outputOutputs = await storage.findOutputs({
     partial: { userId, transactionId }
@@ -374,7 +379,9 @@ async function validateCommitNewTxToStorageArgs (
     const commissionValid = tx.outputs.some(
       x => x.satoshis === commission.satoshis && x.lockingScript.toHex() === asString(commission.lockingScript)
     )
-    if (!commissionValid) { throw new WERR_INVALID_OPERATION('Transaction did not include an output to cover service fee.') }
+    if (!commissionValid) {
+      throw new WERR_INVALID_OPERATION('Transaction did not include an output to cover service fee.')
+    }
   }
 
   const req = EntityProvenTxReq.fromTxid(params.txid, rawTx, transaction.inputBEEF)
@@ -436,7 +443,7 @@ export interface CommitNewTxResults {
   log?: string
 }
 
-async function commitNewTxToStorage (
+async function commitNewTxToStorage(
   storage: StorageProvider,
   userId: number,
   vargs: ValidCommitNewTxToStorageArgs

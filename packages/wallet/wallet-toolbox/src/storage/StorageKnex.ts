@@ -20,6 +20,7 @@ import {
   TableUser,
   transactionColumnsWithoutRawTx
 } from './schema/tables'
+import { TableActionBatch, TableActionBatchBlob, TableActionBatchOutput } from './schema/tables/TableActionBatch'
 import { KnexMigrations } from './schema/KnexMigrations'
 import { Knex } from 'knex'
 import { AdminStatsResult, StorageProvider, StorageProviderOptions } from './StorageProvider'
@@ -68,6 +69,10 @@ export interface StorageKnexOptions extends StorageProviderOptions {
   knex: Knex
 }
 
+// Keep bulk statements below conservative SQLite/MySQL bind-parameter
+// ceilings. The surrounding transaction still makes a complete pack atomic.
+const ACTION_BATCH_BLOB_SQL_CHUNK = 500
+
 export class StorageKnex extends StorageProvider implements WalletStorageProvider {
   knex: Knex
 
@@ -76,6 +81,8 @@ export class StorageKnex extends StorageProvider implements WalletStorageProvide
     if (options.knex == null) throw new WERR_INVALID_PARAMETER('options.knex', 'valid')
     this.knex = options.knex
   }
+
+  protected override supportsActionBatchPersistence (): boolean { return true }
 
   async readSettings (): Promise<TableSettings> {
     return this.validateEntity(verifyOne(await this.toDb(undefined)<TableSettings>('settings')))
@@ -250,6 +257,157 @@ export class StorageKnex extends StorageProvider implements WalletStorageProvide
     const [id] = await this.toDb(trx)<TableProvenTx>('proven_txs').insert(e)
     tx.provenTxId = id
     return tx.provenTxId
+  }
+
+  override async insertActionBatch (batch: TableActionBatch, trx?: TrxToken): Promise<number> {
+    const e = await this.validateEntityForInsert(batch, trx, ['expiresAt', 'hardExpiresAt'])
+    if (e.actionBatchId === 0) delete e.actionBatchId
+    const [id] = await this.toDb(trx)<TableActionBatch>('action_batches').insert(e)
+    batch.actionBatchId = id
+    return id
+  }
+
+  override async findActionBatch (
+    userId: number,
+    batchId: string,
+    trx?: TrxToken
+  ): Promise<TableActionBatch | undefined> {
+    const row = await this.toDb(trx)<TableActionBatch>('action_batches').where({ userId, batchId }).first()
+    return row == null ? undefined : this.validateEntity(row, ['expiresAt', 'hardExpiresAt'])
+  }
+
+  override async findActionBatchForUpdate (
+    userId: number,
+    batchId: string,
+    trx: TrxToken
+  ): Promise<TableActionBatch | undefined> {
+    const row = await this.toDb(trx)<TableActionBatch>('action_batches')
+      .where({ userId, batchId })
+      .forUpdate()
+      .first()
+    return row == null ? undefined : this.validateEntity(row, ['expiresAt', 'hardExpiresAt'])
+  }
+
+  override async findExpiredActionBatches (now: Date, trx?: TrxToken): Promise<TableActionBatch[]> {
+    const rows = await this.toDb(trx)<TableActionBatch>('action_batches')
+      .whereIn('status', ['active', 'prepared'])
+      .andWhere(builder => {
+        void builder
+          .where('expiresAt', '<=', this.validateDateForWhere(now))
+          .orWhere('hardExpiresAt', '<=', this.validateDateForWhere(now))
+      })
+    return this.validateEntities(rows, ['expiresAt', 'hardExpiresAt'])
+  }
+
+  override async updateActionBatch (
+    actionBatchId: number,
+    update: Partial<TableActionBatch>,
+    trx?: TrxToken
+  ): Promise<number> {
+    return await this.toDb(trx)<TableActionBatch>('action_batches')
+      .where({ actionBatchId })
+      .update(this.validatePartialForUpdate(update, ['expiresAt', 'hardExpiresAt']))
+  }
+
+  override async deleteActionBatch (actionBatchId: number, trx?: TrxToken): Promise<void> {
+    await this.toDb(trx)<TableActionBatch>('action_batches').where({ actionBatchId }).delete()
+  }
+
+  override async reserveActionBatchOutputs (
+    reservations: TableActionBatchOutput[],
+    trx?: TrxToken
+  ): Promise<void> {
+    if (reservations.length === 0) return
+    const rows = await Promise.all(reservations.map(async r => await this.validateEntityForInsert(r, trx)))
+    await this.toDb(trx)<TableActionBatchOutput>('action_batch_outputs').insert(rows)
+  }
+
+  override async findActionBatchOutputIds (actionBatchId: number, trx?: TrxToken): Promise<number[]> {
+    const rows = await this.toDb(trx)<TableActionBatchOutput>('action_batch_outputs')
+      .where({ actionBatchId })
+      .select('outputId')
+    return rows.map(r => r.outputId)
+  }
+
+  override async findReservedActionBatchOutputIds (outputIds: number[], trx?: TrxToken): Promise<number[]> {
+    if (outputIds.length === 0) return []
+    const rows = await this.toDb(trx)<TableActionBatchOutput>('action_batch_outputs')
+      .whereIn('outputId', outputIds)
+      .select('outputId')
+    return rows.map(r => r.outputId)
+  }
+
+  override async deleteActionBatchOutputReservations (actionBatchId: number, trx?: TrxToken): Promise<void> {
+    await this.toDb(trx)<TableActionBatchOutput>('action_batch_outputs').where({ actionBatchId }).delete()
+  }
+
+  override async putActionBatchBlobRecord (blob: TableActionBatchBlob, trx?: TrxToken): Promise<void> {
+    const e = await this.validateEntityForInsert(blob, trx)
+    if (e.actionBatchBlobId === 0) delete e.actionBatchBlobId
+    await this.toDb(trx)<TableActionBatchBlob>('action_batch_blobs')
+      .insert(e)
+      .onConflict(['actionBatchId', 'digest'])
+      .ignore()
+  }
+
+  override async findActionBatchBlobRecord (
+    actionBatchId: number,
+    digest: string,
+    trx?: TrxToken
+  ): Promise<TableActionBatchBlob | undefined> {
+    const row = await this.toDb(trx)<TableActionBatchBlob>('action_batch_blobs')
+      .where({ actionBatchId, digest })
+      .first()
+    if (row == null) return undefined
+    if (Buffer.isBuffer(row.bytes)) {
+      row.bytes = new Uint8Array(row.bytes.buffer, row.bytes.byteOffset, row.bytes.byteLength)
+    }
+    this.deserialiseFromKnex(row)
+    return this.validateEntity(row)
+  }
+
+  override async findActionBatchBlobRecords (
+    actionBatchId: number,
+    digests: string[],
+    trx?: TrxToken
+  ): Promise<TableActionBatchBlob[]> {
+    if (digests.length === 0) return []
+    const rows: TableActionBatchBlob[] = []
+    const uniqueDigests = [...new Set(digests)]
+    for (let offset = 0; offset < uniqueDigests.length; offset += ACTION_BATCH_BLOB_SQL_CHUNK) {
+      rows.push(...await this.toDb(trx)<TableActionBatchBlob>('action_batch_blobs')
+        .where({ actionBatchId })
+        .whereIn('digest', uniqueDigests.slice(offset, offset + ACTION_BATCH_BLOB_SQL_CHUNK)))
+    }
+    for (const row of rows) {
+      if (Buffer.isBuffer(row.bytes)) {
+        row.bytes = new Uint8Array(row.bytes.buffer, row.bytes.byteOffset, row.bytes.byteLength)
+      }
+      this.deserialiseFromKnex(row)
+    }
+    return this.validateEntities(rows)
+  }
+
+  override async putActionBatchBlobRecords (
+    blobs: TableActionBatchBlob[],
+    trx?: TrxToken
+  ): Promise<void> {
+    if (blobs.length === 0) return
+    const rows = await Promise.all(blobs.map(async blob => {
+      const row = await this.validateEntityForInsert(blob, trx)
+      if (row.actionBatchBlobId === 0) delete row.actionBatchBlobId
+      return row
+    }))
+    for (let offset = 0; offset < rows.length; offset += ACTION_BATCH_BLOB_SQL_CHUNK) {
+      await this.toDb(trx)<TableActionBatchBlob>('action_batch_blobs')
+        .insert(rows.slice(offset, offset + ACTION_BATCH_BLOB_SQL_CHUNK))
+        .onConflict(['actionBatchId', 'digest'])
+        .ignore()
+    }
+  }
+
+  override async deleteActionBatchBlobRecords (actionBatchId: number, trx?: TrxToken): Promise<void> {
+    await this.toDb(trx)<TableActionBatchBlob>('action_batch_blobs').where({ actionBatchId }).delete()
   }
 
   override async insertProvenTxReq (tx: TableProvenTxReq, trx?: TrxToken): Promise<number> {
@@ -1063,13 +1221,15 @@ export class StorageKnex extends StorageProvider implements WalletStorageProvide
     return this._settings.dbtype
   }
 
-  /** Convert every number-array value to a Buffer and every undefined to null on an arbitrary object. */
+  /** Convert every byte-array value to a Buffer and every undefined to null on an arbitrary object. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private serialiseForKnex (v: any): void {
     for (const key of Object.keys(v)) {
       const val = v[key]
       if (Array.isArray(val) && (val.length === 0 || typeof val[0] === 'number')) {
         v[key] = Buffer.from(val)
+      } else if (val instanceof Uint8Array) {
+        v[key] = Buffer.from(val.buffer, val.byteOffset, val.byteLength)
       } else if (val === undefined) {
         v[key] = null
       }
@@ -1240,6 +1400,28 @@ export class StorageKnex extends StorageProvider implements WalletStorageProvide
     return byOutpoint
   }
 
+  override async findOutputsByOutpointsForUpdate (
+    userId: number,
+    outpoints: Array<{ txid: string, vout: number }>,
+    trx: TrxToken
+  ): Promise<Record<string, TableOutput>> {
+    const byOutpoint: Record<string, TableOutput> = {}
+    if (outpoints.length < 1) return byOutpoint
+    const outpointSet = new Set(outpoints.map(o => `${o.txid}.${o.vout}`))
+    const rows = await this.toDb(trx)<TableOutput>('outputs')
+      .where('userId', userId)
+      .whereIn('txid', [...new Set(outpoints.map(o => o.txid))])
+      .whereIn('vout', [...new Set(outpoints.map(o => o.vout))])
+      .select('*')
+      .forUpdate()
+    const filteredRows = rows.filter(r => outpointSet.has(`${String(r.txid)}.${String(r.vout)}`))
+    for (const row of this.validateEntities(filteredRows, undefined, ['spendable', 'change'])) {
+      await this.validateOutputScript(row, trx)
+      byOutpoint[`${String(row.txid)}.${String(row.vout)}`] = row
+    }
+    return byOutpoint
+  }
+
   override async findOrInsertOutputBasketsBulk (
     userId: number,
     names: string[],
@@ -1282,6 +1464,28 @@ export class StorageKnex extends StorageProvider implements WalletStorageProvide
       if (byTag[tag] == null) byTag[tag] = await this.findOrInsertOutputTag(userId, tag, trx)
     }
     return byTag
+  }
+
+  override async findOrInsertTxLabelsBulk (
+    userId: number,
+    labels: string[],
+    trx?: TrxToken
+  ): Promise<Record<string, TableTxLabel>> {
+    const byLabel: Record<string, TableTxLabel> = {}
+    if (labels.length < 1) return byLabel
+    const uniqueLabels = [...new Set(labels)]
+    const existing = await this.toDb(trx)<TableTxLabel>('tx_labels')
+      .where('userId', userId)
+      .whereIn('label', uniqueLabels)
+      .select('*')
+    for (const label of existing) {
+      if (label.isDeleted) await this.updateTxLabel(verifyId(label.txLabelId), { isDeleted: false }, trx)
+      byLabel[label.label] = label
+    }
+    for (const label of uniqueLabels) {
+      byLabel[label] ??= await this.findOrInsertTxLabel(userId, label, trx)
+    }
+    return byLabel
   }
 
   override async sumSpendableSatoshisInBasket (
@@ -1337,8 +1541,14 @@ export class StorageKnex extends StorageProvider implements WalletStorageProvide
           .whereNotNull('o.derivationSuffix')
           .whereNot('o.derivationSuffix', '')
           .whereNull('o.spentBy')
+          .whereNotExists(function () {
+            void this.select(1)
+              .from('action_batch_outputs as abo')
+              .whereRaw('abo.outputId = o.outputId')
+          })
           .whereIn('t.status', status)
           .select('o.*')
+          .forUpdate()
 
       let output: TableOutput | undefined
 

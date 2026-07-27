@@ -1,15 +1,40 @@
 {
   "name": "@bsv/wallet-toolbox",
-  "version": "2.4.2",
+  "version": "2.4.4",
+  "sideEffects": false,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "BRC100 conforming wallet, wallet storage and wallet signer components",
   "main": "./out/src/index.js",
   "types": "./out/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./out/src/index.d.ts",
+      "require": "./out/src/index.js",
+      "default": "./out/src/index.js"
+    },
+    "./out/src/sdk": {
+      "types": "./out/src/sdk/index.d.ts",
+      "require": "./out/src/sdk/index.js",
+      "default": "./out/src/sdk/index.js"
+    },
+    "./out/src/*": {
+      "types": "./out/src/*.d.ts",
+      "require": "./out/src/*.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "out/src/",
     "docs/",
     "README.md",
     "CHANGELOG.md",
-    "license.md"
+    "LICENSE.txt"
   ],
   "repository": {
     "type": "git",
@@ -17,7 +42,7 @@
     "directory": "packages/wallet/wallet-toolbox"
   },
   "author": "Tone Engel",
-  "license": "SEE LICENSE IN license.md",
+  "license": "SEE LICENSE IN LICENSE.txt",
   "keywords": [
     "bsv",
     "babbage",
@@ -25,13 +50,20 @@
     "BRC100"
   ],
   "scripts": {
-    "test": "npm run build && jest --testPathIgnorePatterns=man.test.ts",
-    "test:watch": "npm run build && jest --testPathIgnorePatterns=man.test.ts --watch",
-    "test:coverage": "npm run build && jest --testPathIgnorePatterns=man.test.ts --coverage",
-    "lint": "ts-standard --fix src/**/*.ts",
-    "lint:ci": "ts-standard src/**/*.ts",
+    "test": "pnpm build && jest --testPathIgnorePatterns='man.test.ts|live.test.ts|bench.test.ts|client/test|mobile/test' --watchman=false",
+    "test:watch": "pnpm build && jest --testPathIgnorePatterns='man.test.ts|live.test.ts|client/test|mobile/test' --watch",
+    "test:coverage": "pnpm build && jest --testPathIgnorePatterns='man.test.ts|live.test.ts|bench.test.ts|client/test|mobile/test' --coverage --watchman=false",
+    "test:property": "jest --runInBand --watchman=false --runTestsByPath src/utility/__tests/actionBatchPack.property.test.ts --testPathIgnorePatterns=man.test.ts",
+    "test:manual": "pnpm build && node ../../../scripts/run-governed-test.mjs manual",
+    "test:live": "pnpm build && node ../../../scripts/run-governed-test.mjs live",
+    "bench:action-batch": "pnpm build && jest --runInBand --runTestsByPath benchmarks/action-batch.bench.test.ts --testPathIgnorePatterns=man.test.ts",
+    "format:check": "pnpm --workspace-root exec prettier --check \"packages/wallet/wallet-toolbox/{README.md,jest.config.ts,package.json,tsconfig*.json}\"",
+    "lint": "oxlint src benchmarks --ignore-pattern 'src/**/__test/**' --ignore-pattern 'src/**/__tests/**' --ignore-pattern 'src/**/*.test.ts' --ignore-pattern 'benchmarks/**/*.test.ts' --deny-warnings",
+    "lint:ci": "pnpm lint",
+    "pack:check": "pnpm build && node ../../../scripts/check-package-artifact.mjs . --modes cjs --exports Wallet,WalletSigner,WalletStorageManager,StorageClient,StorageKnex,Services,Setup,WalletPermissionsManager,WalletSettingsManager,sdk --entry-exports \"./out/src/sdk=WalletError|WERR_BAD_REQUEST|WERR_INTERNAL|WERR_INVALID_PARAMETER|WERR_UNAUTHORIZED\"",
+    "typecheck": "tsc --build --pretty false",
     "build": "tsc --build",
-    "prepublish": "npm run build && npm run doc && npm run sync-versions",
+    "prepublishOnly": "pnpm build",
     "doc": "ts2md",
     "sync-versions": "node syncVersions.js"
   },
@@ -42,36 +74,36 @@
   "dependencies": {
     "@bsv/auth-express-middleware": "workspace:^",
     "@bsv/payment-express-middleware": "workspace:^",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.1",
     "body-parser": "^2.3.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.6.0",
     "hash-wasm": "^4.12.0",
-    "idb": "^8.0.2",
-    "knex": "^3.2.10",
-    "mysql2": "^3.22.5",
-    "ws": "^8.21.0"
+    "idb": "^8.0.3",
+    "knex": "^3.3.0",
+    "mysql2": "^3.23.1",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
+    "@bsv/sdk": "workspace:^",
     "@jest/globals": "^30.4.1",
-    "@types/body-parser": "^1.19.5",
-    "@types/cors": "^2.8.13",
-    "@types/diff": "^8.0.0",
+    "@types/body-parser": "^1.19.6",
+    "@types/cors": "^2.8.19",
     "@types/fs-extra": "^11.0.4",
     "@types/jest": "^30.0.0",
-    "@types/jest-diff": "^24.3.0",
-    "@types/node": "^26.0.0",
-    "chalk": "^4.1.2",
-    "cors": "^2.8.5",
-    "fake-indexeddb": "^6.0.0",
-    "fs-extra": "^11.3.5",
+    "@types/node": "^26.1.1",
+    "cors": "^2.8.6",
+    "fake-indexeddb": "^6.2.5",
+    "fast-check": "^4.9.0",
+    "fs-extra": "^11.4.0",
     "jest": "^30.4.2",
-    "ts-jest": "^29.4.11",
-    "ts-node": "^10.9.1",
-    "ts-standard": "^12.0.0",
+    "picocolors": "^1.1.1",
+    "ts-jest": "^29.4.12",
+    "ts-node": "^10.9.2",
     "ts2md": "^0.2.8",
     "typescript": "^6.0.3",
-    "@bsv/sdk": "workspace:^"
+    "oxlint": "^1.75.0"
   },
   "peerDependencies": {
     "@bsv/sdk": "^2.1.8"

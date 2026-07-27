@@ -4,6 +4,7 @@
     "outDir": "./client/out",
     "target": "es2022",
     "lib": ["es2022", "dom"],
+    "types": ["node"],
     "module": "commonjs",
     "sourceMap": true,
     "allowJs": false,
@@ -19,14 +20,6 @@
       "@bsv/sdk": ["../../sdk/dist/types/mod.d.ts"]
     }
   },
-  "files": [
-    "src/index.client.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "out",
-    "client/out",
-    "mobile/out",
-    "__tests"
-  ]
+  "files": ["src/index.client.ts"],
+  "exclude": ["node_modules", "out", "client/out", "mobile/out", "__tests"]
 }

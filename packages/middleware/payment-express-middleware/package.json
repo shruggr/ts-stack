@@ -1,11 +1,18 @@
 {
   "name": "@bsv/payment-express-middleware",
-  "version": "2.1.0",
+  "version": "2.1.1",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "BSV Blockchain service monetization express middleware",
   "type": "module",
-  "main": "dist/cjs/mod.js",
-  "module": "dist/esm/mod.js",
-  "types": "dist/types/mod.d.ts",
+  "main": "./dist/mod.cjs",
+  "module": "./dist/mod.mjs",
+  "types": "./dist/mod.d.mts",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bsv-blockchain/ts-stack.git",
@@ -13,19 +20,22 @@
   },
   "files": [
     "dist",
-    "src",
-    "mod.ts",
+    "README.md",
     "LICENSE.txt"
   ],
   "scripts": {
-    "test": "npm run build && jest --runInBand",
-    "test:watch": "npm run build && jest --watch",
-    "test:coverage": "npm run build && jest --coverage",
-    "lint": "ts-standard --fix src/**/*.ts",
-    "build": "tsc -b && tsconfig-to-dual-package tsconfig.cjs.json",
-    "dev": "tsc -b -w",
-    "prepublish": "npm run build",
-    "doc": "ts2md --inputFilename=mod.ts --outputFilename=API.md --filenameSubstring=API --firstHeadingLevel=1"
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "doc": "ts2md --inputFilename=mod.ts --outputFilename=API.md --filenameSubstring=API --firstHeadingLevel=1",
+    "format:check": "pnpm --workspace-root exec prettier --check \"packages/middleware/payment-express-middleware/**/*.{js,json,ts}\"",
+    "lint": "oxlint mod.ts src --deny-warnings",
+    "pack:check": "pnpm build && node ../../../scripts/check-package-artifact.mjs . --exports InMemoryPaymentReplayStore,createPaymentMiddleware",
+    "prepublishOnly": "pnpm build",
+    "test": "jest --runInBand",
+    "test:property": "jest --runInBand src/__tests/PaymentReplayStore.property.test.ts",
+    "test:coverage": "jest --coverage --runInBand",
+    "test:watch": "jest --watch",
+    "typecheck": "tsc --project tsconfig.typecheck.json"
   },
   "keywords": [
     "BSV",
@@ -36,29 +46,33 @@
   ],
   "exports": {
     ".": {
-      "types": "./dist/types/mod.d.ts",
-      "import": "./dist/esm/mod.js",
-      "require": "./dist/cjs/mod.js"
+      "import": {
+        "types": "./dist/mod.d.mts",
+        "default": "./dist/mod.mjs"
+      },
+      "require": {
+        "types": "./dist/mod.d.cts",
+        "default": "./dist/mod.cjs"
+      }
     },
-    "./*.ts": {
-      "types": "./dist/types/src/*.d.ts",
-      "import": "./dist/esm/src/*.js",
-      "require": "./dist/cjs/src/*.js"
-    }
+    "./package.json": "./package.json"
   },
   "author": "BSV Blockchain Association",
   "license": "SEE LICENSE IN LICENSE.txt",
   "devDependencies": {
     "@bsv/auth-express-middleware": "workspace:^",
-    "@types/body-parser": "^1.19.5",
+    "@bsv/sdk": "workspace:^",
+    "@types/body-parser": "^1.19.6",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
+    "@types/node": "^26.1.1",
+    "fast-check": "^4.9.0",
     "jest": "^30.4.2",
-    "ts-jest": "^29.4.11",
-    "ts-standard": "^12.0.2",
-    "ts2md": "^0.2.0",
-    "tsconfig-to-dual-package": "^1.2.0",
-    "typescript": "^6.0.3",
-    "@bsv/sdk": "workspace:^"
+    "oxlint": "^1.75.0",
+    "ts-jest": "^29.4.12",
+    "ts2md": "^0.2.8",
+    "tsdown": "0.22.14",
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "express": "^5.2.1"

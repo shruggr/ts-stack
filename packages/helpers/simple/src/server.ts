@@ -88,11 +88,10 @@ export { ServerWallet } from './server/server-wallet'
 // Re-export server handler utilities
 // ============================================================================
 
+export type { HandlerRequest, HandlerResponse, RouteHandler, RegistryResult } from './server/index'
+
 export {
-  // Handler types & utilities
-  HandlerRequest,
-  HandlerResponse,
-  RouteHandler,
+  // Handler utilities
   getSearchParams,
   jsonResponse,
   toNextHandlers,
@@ -100,7 +99,6 @@ export {
   JsonFileStore,
   // Identity Registry
   IdentityRegistry,
-  RegistryResult,
   createIdentityRegistryHandler,
   // DID Resolver
   DIDResolverService,

@@ -1,6 +1,12 @@
 import express, { Request, Response, NextFunction } from 'express'
 import bodyParser from 'body-parser'
-import { CompletedProtoWallet, MasterCertificate, PrivateKey, RequestedCertificateSet, VerifiableCertificate } from '@bsv/sdk'
+import {
+  CompletedProtoWallet,
+  MasterCertificate,
+  PrivateKey,
+  RequestedCertificateSet,
+  VerifiableCertificate
+} from '@bsv/sdk'
 import { MockWallet } from './MockWallet'
 import { createAuthMiddleware } from '../index'
 // May be necessary when testing depending on your environment:
@@ -9,7 +15,9 @@ import { createAuthMiddleware } from '../index'
 
 // Create Express app instance
 // Export a function to start the server programmatically
-export const startCertServer = (port = 3001): ReturnType<typeof app.listen> & { ready: Promise<void> } => {
+export const startCertServer = (
+  port = 3001
+): ReturnType<typeof app.listen> & { ready: Promise<void> } => {
   const app = express()
   app.disable('x-powered-by')
 
@@ -31,7 +39,9 @@ export const startCertServer = (port = 3001): ReturnType<typeof app.listen> & { 
 
   // Asynchronous setup for certificates — exposed as server.ready
   const ready = (async () => {
-    const certifierPrivateKey = PrivateKey.fromHex('5a4d867377bd44eba1cecd0806c16f24e293f7e218c162b1177571edaeeaecef')
+    const certifierPrivateKey = PrivateKey.fromHex(
+      '5a4d867377bd44eba1cecd0806c16f24e293f7e218c162b1177571edaeeaecef'
+    )
     const certifierWallet = new CompletedProtoWallet(certifierPrivateKey)
     const certificateType = 'z40BOInXkI8m7f/wBrv4MJ09bZfzZbTj2fJqCtONqCY='
     const fields = { firstName: 'Alice', lastName: 'Doe' }
@@ -71,9 +81,14 @@ export const startCertServer = (port = 3001): ReturnType<typeof app.listen> & { 
   const authMiddleware = createAuthMiddleware({
     allowUnauthenticated: false,
     wallet: mockWallet,
-    onCertificatesReceived: async (_senderPublicKey: string, certs: VerifiableCertificate[], req: Request, res: Response, next: NextFunction) => {
+    onCertificatesReceived: async (
+      _senderPublicKey: string,
+      certs: VerifiableCertificate[],
+      _req: Request,
+      _res: Response,
+      _next: NextFunction
+    ) => {
       certsreceived = certs
-      console.log('Certificates received:', certs)
     },
     certificatesToRequest
   })
@@ -86,14 +101,12 @@ export const startCertServer = (port = 3001): ReturnType<typeof app.listen> & { 
   })
 
   app.post('/cert-protected-endpoint', async (req: Request, res: Response) => {
-    console.log('Received POST body:', req.body)
     // wait a moment for the certificates to be received
     await new Promise(resolve => {
       const t = setTimeout(resolve, 5000)
       if (typeof t.unref === 'function') t.unref()
     })
     if (certsreceived) {
-      console.log('Certificates received in POST:', certsreceived)
       res.status(200).send({ message: 'You have certs!' })
     } else {
       res.status(401).send({ message: 'You must have certs!' })
@@ -101,7 +114,7 @@ export const startCertServer = (port = 3001): ReturnType<typeof app.listen> & { 
   })
 
   // Fallback for 404 errors
-  app.use((req, res, next) => {
+  app.use((req, res, _next) => {
     res.status(404).json({
       status: 'error',
       code: 'NOT_FOUND',
@@ -109,9 +122,7 @@ export const startCertServer = (port = 3001): ReturnType<typeof app.listen> & { 
     })
   })
 
-  const server = app.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`)
-  })
+  const server = app.listen(port)
   server.ready = ready
   return server
 }

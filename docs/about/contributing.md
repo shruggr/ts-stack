@@ -1,10 +1,10 @@
 ---
 id: about-contributing
-title: "Contributing"
+title: 'Contributing'
 kind: meta
-version: "1.0.0"
-last_updated: "2026-04-28"
-last_verified: "2026-04-28"
+version: '1.0.0'
+last_updated: '2026-04-28'
+last_verified: '2026-04-28'
 review_cadence_days: 90
 status: stable
 tags: [about, contributing, development, community]
@@ -60,6 +60,7 @@ git checkout -b feature/your-feature-name
 ```
 
 Branch naming conventions:
+
 - `feature/...` — New features
 - `fix/...` — Bug fixes
 - `docs/...` — Documentation
@@ -107,17 +108,49 @@ pnpm test --watch
 pnpm test --coverage
 ```
 
+Required tests must not be empty or anonymously skipped. Manual, live-network,
+resource-intensive, and intended conformance gaps follow the
+[test-quality governance contract](../reference/test-quality-governance/).
+Run `pnpm test:governance` before submitting test-classification changes. New
+untrusted parsers, codecs, serializers, signature framing, or network
+destination logic should include a registered property suite; use
+`pnpm test:property` to run the complete reproducible campaign. Every property
+suite also owns a focused mutation target so its assertions are proven capable
+of detecting semantic defects:
+
+```bash
+# List the governed targets
+pnpm test:mutation --list
+
+# Run the target for the boundary being changed
+pnpm test:mutation --target p2p-messages
+```
+
+When a mutant survives, add the missing observable assertion or correlated
+input case when it represents a real behavior gap. Do not add broad mutation
+exclusions or weaken the ratchet to make a pull request pass.
+
 ### Lint Code
 
 ```bash
 # Check linting
 pnpm lint
 
-# Fix linting issues
-pnpm lint --fix
+# Fix linting issues in a package
+pnpm --filter @bsv/sdk exec oxlint --fix src
 ```
 
-Uses **ts-standard** for consistent code style.
+Uses **Oxlint** for fast, consistent TypeScript checks. Errors and warnings fail
+CI for every affected package.
+
+### Check Formatting
+
+```bash
+pnpm format:check
+```
+
+The formatting check is read-only. Run the relevant package's Prettier command
+with `--write` before submitting when it reports a mismatch.
 
 ### Build Packages
 
@@ -165,6 +198,7 @@ git push origin feature/your-feature-name
 ### 2. Create PR on GitHub
 
 Include:
+
 - **Title** — Clear, descriptive (e.g., "fix: validate BRC-100 output satoshis")
 - **Description** — What changed and why
 - **Tests** — Link to related tests
@@ -175,24 +209,29 @@ Template:
 
 ```markdown
 ## Description
+
 Briefly describe the change.
 
 ## Related Issue
+
 Fixes #123
 
 ## Type of Change
+
 - [ ] Bug fix
 - [ ] New feature
 - [ ] Breaking change
 - [ ] Documentation update
 
 ## Testing
+
 - [ ] Added unit tests
 - [ ] Added conformance vectors
 - [ ] All tests pass locally
 - [ ] Ran linter
 
 ## Documentation
+
 - [ ] Updated relevant doc pages
 - [ ] Updated CHANGELOG
 ```
@@ -207,11 +246,11 @@ Review feedback is normal. We aim to be constructive and helpful.
 
 ```typescript
 // Good — import specific exports from the top-level or subpath
-import { PrivateKey, Hash } from '@bsv/sdk';
-import { Transaction } from '@bsv/sdk/transaction';
+import { PrivateKey, Hash } from '@bsv/sdk'
+import { Transaction } from '@bsv/sdk/transaction'
 
 // Bad — avoid wildcard imports
-import * as sdk from '@bsv/sdk';
+import * as sdk from '@bsv/sdk'
 ```
 
 ### Naming
@@ -219,14 +258,14 @@ import * as sdk from '@bsv/sdk';
 ```typescript
 // Good
 interface WalletConfig {
-  publicKey: string;
-  maxTransactionSize: number;
+  publicKey: string
+  maxTransactionSize: number
 }
 
 // Bad
 interface WalletConfigObj {
-  pubkey: string;
-  maxTxSize: number;
+  pubkey: string
+  maxTxSize: number
 }
 ```
 
@@ -235,13 +274,13 @@ interface WalletConfigObj {
 ```typescript
 // Good
 if (!isValid(input)) {
-  throw new Error('Invalid input: expected hex string');
+  throw new Error('Invalid input: expected hex string')
 }
 
 // Bad
 if (!isValid(input)) {
-  console.error('Invalid input');
-  return null;
+  console.error('Invalid input')
+  return null
 }
 ```
 
@@ -257,9 +296,17 @@ Run before submitting:
 
 ```bash
 pnpm test
+pnpm test:property
 pnpm conformance
 pnpm lint
+pnpm format:check
+pnpm health:check
+pnpm typecheck
 ```
+
+Run the affected mutation target while iterating. Root toolchain, SDK,
+governance, and CI changes require the complete `pnpm test:mutation --all`
+campaign; CI selects this automatically.
 
 ## Reporting Issues
 
@@ -277,19 +324,23 @@ Template:
 ## Bug Report
 
 ### Environment
+
 - Node: v18.0.0
 - @bsv/sdk: 1.2.3
 - OS: macOS 13.0
 
 ### Reproduction
+
 ```typescript
 // Minimal code to reproduce
 ```
 
 ### Expected
+
 [Expected behavior]
 
 ### Actual
+
 [Actual behavior]
 ````
 
@@ -319,6 +370,7 @@ footer
 ```
 
 Types:
+
 - `feat:` — New feature
 - `fix:` — Bug fix
 - `docs:` — Documentation
@@ -351,7 +403,11 @@ If any check fails, fix the issue and push again.
 
 ## Licensing
 
-By contributing, you agree that your contributions are licensed under the same license as ts-stack (typically MIT or BSL-1.1).
+By contributing, you agree that your contributions are licensed under the
+[Open BSV License Version 6](https://github.com/bsv-blockchain/ts-stack/blob/main/LICENSE.txt),
+the same license used uniformly throughout ts-stack. See the
+[licensing policy](../reference/licensing.md) for the package and release
+controls that keep every first-party project on the current canonical text.
 
 ## Code of Conduct
 

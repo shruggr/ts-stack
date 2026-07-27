@@ -52,7 +52,7 @@ This server provides two main services:
 - **Automatic export** at 100k block boundaries
 - **Self-hosting CDN** - becomes a headers source for others
 - **Persistent storage** with Docker volumes
-- **CORS enabled** for cross-origin access
+- **Public browser access** by default, with opt-in exact origin restriction
 
 ## ✨ Key Features
 
@@ -440,7 +440,7 @@ Contributions welcome! Please:
 
 ## 📄 License
 
-MIT License - see LICENSE file for details
+[Open BSV License Version 6](./LICENSE.txt)
 
 ## 🔗 Resources
 

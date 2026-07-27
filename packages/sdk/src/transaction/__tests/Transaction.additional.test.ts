@@ -28,6 +28,21 @@ describe('Transaction – additional coverage', () => {
         'beef must conform to BRC-95 and must contain the subject txid.'
       )
     })
+
+    it('also rejects non-atomic BEEF through the zero-copy parser', () => {
+      const beefBytes = Uint8Array.from(toArray(KNOWN_BEEF_V1_HEX, 'hex'))
+      expect(() => Transaction.fromAtomicBEEFView(beefBytes)).toThrow(
+        'beef must conform to BRC-95 and must contain the subject txid.'
+      )
+    })
+  })
+
+  describe('fromEF – marker validation', () => {
+    it('rejects an invalid EF marker before parsing transaction fields', () => {
+      const efBytes = Uint8Array.from(toArray(KNOWN_EF_HEX, 'hex'))
+      efBytes[4] = 1
+      expect(() => Transaction.fromEF(efBytes)).toThrow('Invalid EF marker')
+    })
   })
 
   describe('addInput', () => {
@@ -146,6 +161,30 @@ describe('Transaction – additional coverage', () => {
   })
 
   describe('sign', () => {
+    it('preserves existing unlocking scripts when requested', async () => {
+      const existingScript = UnlockingScript.fromHex('51')
+      const sign = jest.fn(async () => UnlockingScript.fromHex('52'))
+      const tx = new Transaction(
+        1,
+        [{
+          sourceTXID: '00'.repeat(32),
+          sourceOutputIndex: 0,
+          unlockingScript: existingScript,
+          unlockingScriptTemplate: {
+            sign,
+            estimateLength: async () => 1
+          }
+        }],
+        [{ lockingScript: new LockingScript(), satoshis: 0 }],
+        0
+      )
+
+      await tx.sign({ skipExistingSignatures: true })
+
+      expect(sign).not.toHaveBeenCalled()
+      expect(tx.inputs[0].unlockingScript).toBe(existingScript)
+    })
+
     it('throws when an output has undefined satoshis and change is not set', async () => {
       const tx = new Transaction(
         1,

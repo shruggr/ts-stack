@@ -3,10 +3,10 @@ name: Release
 on:
   push:
     tags:
-      - '**/v*'        # e.g. packages/sdk/v1.2.3 — single-package release
-      - 'release/v*'   # e.g. release/v2026-05-17 — cascade release (multi-package)
-      - 'v*'           # monorepo-wide tag (publishes everything changed since origin/main)
-      - '!infra/v*'    # infra/v* tags drive infra-release.yaml (Docker images), not npm publish
+      - '**/v*' # e.g. packages/sdk/v1.2.3 — single-package release
+      - 'release/v*' # e.g. release/v2026-05-17 — cascade release (multi-package)
+      - 'v*' # monorepo-wide tag (publishes everything changed since origin/main)
+      - '!infra/v*' # infra/v* tags drive infra-release.yaml (Docker images), not npm publish
   workflow_dispatch:
     inputs:
       mode:
@@ -19,32 +19,79 @@ on:
         required: false
         default: ''
 
+permissions: {}
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm-production
+    timeout-minutes: 90
     permissions:
       contents: write
-      id-token: write   # required for npm OIDC provenance
+      id-token: write # required for npm OIDC provenance
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
           cache: pnpm
 
+      - name: Verify trusted release source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          git fetch origin main
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+              echo "::error::Manual npm releases must run from main."
+              exit 1
+            fi
+          elif ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Release tags must point to a commit reachable from main."
+            exit 1
+          fi
+
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        # Release builds do not need dependency lifecycle scripts. Package
+        # prepublish scripts still run explicitly during pnpm publish. Rebuild
+        # the one audited tool binary used by the workspace build instead of
+        # allowing arbitrary transitive lifecycle scripts.
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Rebuild the audited build tool
+        run: pnpm rebuild esbuild
+
+      - name: Reject high and critical dependency advisories
+        run: pnpm audit:security
 
       - name: Build all packages
         run: pnpm -r --filter '!@bsv/ts-stack' run build
+
+      - name: Typecheck workspace
+        run: pnpm typecheck
+
+      - name: Verify package license payloads
+        run: pnpm license:pack-check
+
+      - name: Verify package artifacts and clean consumers
+        run: pnpm -r --if-present --filter '!@bsv/ts-stack' run pack:check
+
+      - name: Verify wallet browser and mobile platform consumers
+        run: |
+          pnpm --filter @bsv/wallet-toolbox-client run test:browser
+          pnpm --filter @bsv/wallet-toolbox-mobile run test:mobile
 
       # Resolve release mode + filter. Three shapes:
       #
@@ -179,7 +226,7 @@ jobs:
           git clean -fd
 
           pnpm sync-versions
-          pnpm install --lockfile-only
+          pnpm install --lockfile-only --ignore-scripts
 
           # Infra components are NOT in the pnpm workspace — each has its own
           # npm package-lock.json that goes stale when sync-versions rewrites

@@ -4,9 +4,9 @@ title: "@bsv/teranode-listener"
 kind: package
 domain: network
 npm: "@bsv/teranode-listener"
-version: "1.0.3"
-last_updated: "2026-04-29"
-last_verified: "2026-04-29"
+version: "1.1.1"
+last_updated: "2026-07-24"
+last_verified: "2026-07-24"
 status: stable
 tags: ["network", "broadcast", "teranode", "p2p", "libp2p"]
 ---
@@ -165,7 +165,7 @@ await listener.stop()
 
 ## Common pitfalls
 
-1. **Node.js 18+ required** — Modern async/await and crypto features
+1. **Node.js 22+ required** — This is the supported runtime floor declared by the package
 2. **ES modules only** — Package is ESM; use `.mjs` files or set `"type": "module"` in package.json
 3. **Teranode mainnet defaults** — Without config, connects to official Teranode mainnet
 4. **PSK hex format** — `sharedKey` must be hex-encoded; library auto-formats to PSK

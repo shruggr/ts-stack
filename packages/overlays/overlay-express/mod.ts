@@ -1,6 +1,7 @@
 export {
   default,
   type EngineConfig,
+  type EdgePolicyConfig,
   type HealthCheckDefinition,
   type HealthCheckHandler,
   type HealthCheckResult,
@@ -13,7 +14,12 @@ export { BanService, type BannedRecord } from './src/BanService.js'
 export { BanAwareLookupWrapper } from './src/BanAwareLookupWrapper.js'
 export { BanAwareTopicManager } from './src/BanAwareTopicManager.js'
 export { BanAwareSHIPStorage, BanAwareSLAPStorage } from './src/BanAwareDiscoveryStorage.js'
-export { JanitorService, type JanitorConfig, type JanitorReport, type HostHealthResult } from './src/JanitorService.js'
+export {
+  JanitorService,
+  type JanitorConfig,
+  type JanitorReport,
+  type HostHealthResult
+} from './src/JanitorService.js'
 export {
   OverlayMonitor,
   analyzeOverlayAnchorTip,
@@ -36,10 +42,7 @@ export {
   type ArcadeMerkleProof,
   type ArcadeProviderConfig
 } from './src/ArcadeProvider.js'
-export {
-  ProviderChainBroadcaster,
-  type NamedBroadcaster
-} from './src/ProviderChainBroadcaster.js'
+export { ProviderChainBroadcaster, type NamedBroadcaster } from './src/ProviderChainBroadcaster.js'
 export {
   ChaintracksProvider,
   type ChaintracksHeader,

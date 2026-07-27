@@ -6,6 +6,71 @@ attention to changes that materially alter behavior or extend functionality.
 
 ## wallet-toolbox (unreleased)
 
+- Add capability-negotiated action-batch manifest format 2 without changing
+  BRC-100. It derives source/output scripts from the authenticated transaction
+  graph, retains only the external proof frontier, bulk-loads shared storage
+  rows, and commits an already prepared manifest by semantic digest. Version-1
+  providers and clients retain their existing behavior.
+- Add authenticated `ABP1` multi-blob uploads with bounded gzip/Brotli/identity
+  negotiation, decompression limits, prepared-manifest authorization, per-item
+  content verification, bounded concurrency, and one-transaction bulk storage.
+  The physical request limit chunks unbounded logical transactions; it is not
+  a script or consensus limit.
+- Add optional script-verifier injection to Wallet, setup helpers, and local
+  storage providers. Internal checks use explicit consensus context, distinguish
+  resource exhaustion from invalid scripts, and continue verifying resolvable
+  inputs when another source transaction is intentionally omitted.
+- Retain typed bytes through action-batch planning, hashing, validation, and
+  chunk assembly; preload external inputs and shared metadata once per atomic
+  manifest; and convert Atomic BEEF only at the historical public `number[]`
+  boundary without changing BRC-100 or storage protocol contracts.
+- Make StorageServer, AdminServer, and the reusable ChaintracksService
+  credential-free public-CORS compatible by default, with opt-in exact origin
+  lists and configurable CSP/browser response headers. Add bounded parsers,
+  in-flight work and Node connection limits, stable non-sensitive errors, and
+  metadata-only request logging. Storage RPC work remains protected by
+  BRC-103 identity, per-IP/per-identity limits, method allowlisting, and
+  optional payment policy.
+- Bound StorageServer work per source IP before BRC-103 authentication and per
+  identity before payment/RPC handling. Both stages support shared stores, and
+  proxy trust now requires an explicit hop/subnet/predicate configuration.
+- Harden CWI/WAB account continuity so overlay failures, malformed or ambiguous
+  UMP results, and snapshot-load failures cannot silently enter new-user
+  onboarding. Add an expiring WAB auth session, legacy-compatible WAB account
+  status inference, canonical E.164 phone identity, bounded KDF/snapshot
+  parsing, and fail-closed UMP renewal/broadcast behavior.
+- Replace WAB's endpoint-by-endpoint raw `fetch` calls with one typed transport
+  enforcing HTTPS (localhost excepted), timeouts, request/response limits,
+  redirect and ambient-credential protection, correlation IDs, and privacy-safe errors.
+  Wallet authentication, UMP, WAB, and snapshot events now support the SDK's
+  opt-in generic telemetry sink without reporting keys, snapshots, payloads,
+  OTPs, or Shamir shares.
+- Add automatically negotiated, in-memory planning for dependent `noSend` workloads. Capable
+  storage providers reserve funding once, perform middle action planning and signing without
+  persistence round trips, and atomically commit the complete workspace on `sendWith`. Existing
+  BRC-100 arguments and results are unchanged, and providers without `actionBatch: 1` retain the
+  legacy path. SQLite, MySQL/Knex, IndexedDB, authenticated remote clients, browser, and mobile
+  builds share the same capability contract.
+- Add leased per-output batch reservations, expiry cleanup, adaptive pool extension, idempotent
+  manifest commits, inline content-addressed blobs up to 4 MiB, and authenticated binary uploads
+  in provider-sized chunks with four-way bounded concurrency for larger batches. Broadcast remains
+  outside the atomic persistence transaction.
+- Make batch funding converge on fragmented wallets at production fee rates. Reservation targets
+  include the fee and viable-change overhead of an added input, reactive extensions request only
+  the remaining shortfall, and EWMA runway extensions subtract unconsumed reserved funding without
+  compounding after empty or partial responses. The regression runs 16 independent actions through
+  both the in-process and authenticated remote-storage paths and commits the complete batch.
+- Bind remote batch authorization exclusively to the BRC-103 authenticated identity and its active
+  storage provider, ignoring caller-supplied user IDs and active-state claims. Restrict JSON-RPC
+  dispatch to the public remote-storage protocol so authenticated callers cannot invoke low-level
+  provider methods, and rate-limit authenticated RPCs per identity key without limiting workspace
+  length. Unauthenticated and cross-user batch-management regressions cover the boundary.
+- Replace the cumulative 64-output reservation ceiling with repeatable extensions bounded to 64
+  outputs per storage call. Workspaces and spend chains no longer have an action-count or confirmed
+  funding-input ceiling; an 80-action independent batch crosses the old boundary and commits.
+- Add a retained workload benchmark covering 1, 10, 50, and 250 actions across dependent,
+  independent, mixed-input, and two-step signing models, four script sizes, and 25/100/250 ms
+  storage latency. Run it with `pnpm --filter @bsv/wallet-toolbox bench:action-batch`.
 - Release prep for `2.4.2`: transaction-pipeline, BEEF fetching, and binary transport
   performance improvements described below, published in lockstep for Node, browser, and mobile.
 - Transaction pipeline performance: reuse parsed BEEF through `createAction`/`signAction`, retain
@@ -34,7 +99,7 @@ attention to changes that materially alter behavior or extend functionality.
   `auth-express-middleware@2.1.1` likewise declares its `mime-types` runtime
   import so strict package managers do not fail when loading the built packages.
 
-- Release prep for `2.4.2`: proof completion now discovers every local
+ - Release prep for `2.4.2`: proof completion now discovers every local
    transaction row sharing the proven txid, repairs notification-set drift from
    concurrent multi-user `internalizeAction` calls, and idempotently completes
    any local copy omitted by a last-writer-wins notification update.

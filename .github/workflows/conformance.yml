@@ -6,19 +6,32 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: conformance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   ts-runner:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+          cache: pnpm
       - name: Install deps
-        run: pnpm install --no-frozen-lockfile
-      - name: Build TS SDK
-        run: pnpm --filter @bsv/sdk run build
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build TS runner dependencies
+        run: pnpm -r --filter '@bsv/wallet-toolbox...' run build
+      - name: Check TS conformance runner quality
+        run: |
+          pnpm --filter @bsv/conformance-runner-ts format:check
+          pnpm --filter @bsv/conformance-runner-ts lint
+          pnpm --filter @bsv/conformance-runner-ts typecheck
       - name: Create reports directory
         run: mkdir -p conformance/reports
       - name: Run TS conformance runner

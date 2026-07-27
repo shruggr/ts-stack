@@ -1,9 +1,31 @@
 {
   "name": "@bsv/simple",
-  "version": "0.4.0",
+  "version": "0.4.1",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Simplified, modular helper library for BSV blockchain development",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "typesVersions": {
+    "*": {
+      "browser": [
+        "dist/browser.d.mts"
+      ],
+      "server": [
+        "dist/server.d.mts"
+      ],
+      "*": [
+        "dist/index.d.mts"
+      ]
+    }
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bsv-blockchain/ts-stack.git",
@@ -11,26 +33,48 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./browser": {
-      "types": "./dist/browser.d.ts",
-      "default": "./dist/browser.js"
+      "import": {
+        "types": "./dist/browser.d.mts",
+        "default": "./dist/browser.mjs"
+      },
+      "require": {
+        "types": "./dist/browser.d.cts",
+        "default": "./dist/browser.cjs"
+      }
     },
     "./server": {
-      "types": "./dist/server.d.ts",
-      "default": "./dist/server.js"
+      "import": {
+        "types": "./dist/server.d.mts",
+        "default": "./dist/server.mjs"
+      },
+      "require": {
+        "types": "./dist/server.d.cts",
+        "default": "./dist/server.cjs"
+      }
     }
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "tsdown src/index.ts src/browser.ts src/server.ts --format cjs,esm --dts --sourcemap --clean --out-dir dist --platform node --tsconfig tsconfig.build.json --unbundle",
+    "dev": "pnpm build --watch",
+    "format:check": "pnpm --workspace-root exec prettier --check \"packages/helpers/simple/src/**/*.ts\" \"packages/helpers/simple/*.{cjs,json,ts}\"",
+    "lint": "oxlint src --deny-warnings",
+    "pack:check": "node ../../../scripts/check-package-artifact.mjs . --exports CertificationError,Certifier,CredentialError,CredentialIssuer,CredentialSchema,DID,DIDError,MemoryRevocationStore,MessageBoxError,Overlay,SimpleError,TransactionError,WalletCore,WalletError,createWallet,toVerifiableCredential,toVerifiablePresentation --entry-exports \"./browser=Certifier|CredentialIssuer|CredentialSchema|DID|MemoryRevocationStore|Overlay|WalletCore|createWallet|toVerifiableCredential|toVerifiablePresentation;./server=FileRevocationStore|ServerWallet|generatePrivateKey|JsonFileStore|IdentityRegistry|DIDResolverService|ServerWalletManager|createIdentityRegistryHandler|createDIDResolverHandler|createServerWalletHandler|createCredentialIssuerHandler\"",
+    "prepublishOnly": "pnpm build",
     "test": "jest",
+    "test:browser": "pnpm build && node ../../../scripts/check-browser-package.mjs .",
     "test:coverage": "jest --coverage",
-    "lint": "ts-standard --fix src/**/*.ts",
-    "lint:ci": "ts-standard src/**/*.ts",
-    "prepublishOnly": "npm run build"
+    "test:watch": "jest --watch",
+    "typecheck": "tsc --project tsconfig.typecheck.json"
   },
   "keywords": [
     "bsv",
@@ -42,34 +86,28 @@
     "tokens",
     "certification"
   ],
-  "author": "",
-  "license": "MIT",
+  "author": "BSV Blockchain Association",
+  "license": "SEE LICENSE IN LICENSE.txt",
   "dependencies": {
-    "@bsv/message-box-client": "^2.2.0",
-    "@bsv/wallet-toolbox": "^2.3.3",
-    "@bsv/wallet-toolbox-client": "^2.3.3"
-  },
-  "overrides": {
-    "minimatch": "^10.2.1"
-  },
-  "ts-standard": {
-    "project": "tsconfig.eslint.json",
-    "ignore": [
-      "dist"
-    ]
+    "@bsv/message-box-client": "workspace:^",
+    "@bsv/wallet-toolbox": "workspace:^",
+    "@bsv/wallet-toolbox-client": "workspace:^"
   },
   "devDependencies": {
+    "@bsv/sdk": "workspace:^",
     "@types/jest": "^30.0.0",
-    "@types/node": "^26.0.0",
+    "@types/node": "^26.1.1",
     "dotenv": "^17.4.2",
     "jest": "^30.4.2",
-    "ts-standard": "^12.0.2",
+    "ts-jest": "^29.4.12",
+    "tsdown": "0.22.14",
     "typescript": "^6.0.3",
-    "@bsv/sdk": "workspace:^"
+    "oxlint": "^1.75.0"
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE.txt"
   ],
   "bugs": {
     "url": "https://github.com/bsv-blockchain/ts-stack/issues"

@@ -1,17 +1,20 @@
 # Build stage
-FROM node:20-alpine AS builder
+# Base version 24.18.0-alpine3.24; the digest is the authoritative build input.
+FROM node@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS builder
 
 WORKDIR /app
 
 # better-sqlite3 (transitive via @bsv/wallet-toolbox) ships no musl prebuilt for
-# node 20 — needs python3/make/g++ to compile from source on Alpine.
-RUN apk add --no-cache python3 make g++
+# Node 24 — needs python3/make/g++ to compile from source on Alpine.
+RUN apk add --no-cache g++ make python3
 
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install without running arbitrary dependency lifecycle scripts, then compile
+# the one allowlisted native module required by the service.
+RUN npm ci --ignore-scripts \
+ && npm rebuild better-sqlite3
 
 # Copy source code
 COPY tsconfig.json ./
@@ -21,23 +24,23 @@ COPY src ./src
 RUN npm run build
 
 # Production stage
-FROM node:20-alpine
+FROM node@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd
 
 WORKDIR /app
 
-# Patch OS openssl libs (CVE-2026-45447) and install better-sqlite3 native build
-# tools (see builder stage). Upgrade and add toolchain in one layer; the toolchain
-# is removed after npm ci below to keep the image slim.
-RUN apk upgrade --no-cache libssl3 libcrypto3 \
- && apk add --no-cache --virtual .build-deps python3 make g++
+# Install better-sqlite3 native build tools (see builder stage). The pinned
+# base is refreshed by reviewed Dependabot changes instead of mutating it with
+# a time-dependent apk upgrade. The toolchain is removed after npm ci below.
+RUN apk add --no-cache --virtual .build-deps g++ make python3
 
 # Copy package files
 COPY package*.json ./
 
 # Install production dependencies only. Then strip npm from the runtime image:
-# the app runs via `node` (see CMD) and node:20-alpine's bundled npm ships its
+# the app runs via `node` (see CMD) and node:24-alpine's bundled npm ships its
 # own HIGH-CVE deps (tar/glob/minimatch/cross-spawn/undici) that we don't need.
-RUN npm ci --omit=dev \
+RUN npm ci --omit=dev --ignore-scripts \
+ && npm rebuild better-sqlite3 \
  && apk del .build-deps \
  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 

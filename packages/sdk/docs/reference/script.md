@@ -10,6 +10,8 @@ Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](
 | [ScriptChunk](#interface-scriptchunk) |
 | [ScriptTemplate](#interface-scripttemplate) |
 | [ScriptTemplateUnlock](#interface-scripttemplateunlock) |
+| [SpendVerificationContext](#interface-spendverificationcontext) |
+| [SpendVerifierInterface](#interface-spendverifierinterface) |
 
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
@@ -101,6 +103,42 @@ See also: [Transaction](./transaction.md#class-transaction), [UnlockingScript](.
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
 ---
+### Interface: SpendVerificationContext
+
+Explicit chain context for script verification. Transaction version is script
+data and is not a policy/consensus selector.
+
+```ts
+export default interface SpendVerificationContext {
+    consensus: boolean;
+    blockHeight?: number;
+    utxoHeight?: number;
+    verifyFlags?: string | string[];
+}
+```
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
+### Interface: SpendVerifierInterface
+
+An asynchronous backend capable of validating a single Spend-shaped input.
+The explicit context is authoritative when supplied.
+
+```ts
+export default interface SpendVerifierInterface {
+    isReady?: () => boolean;
+    shouldVerifySpend?: (spend: Spend, context?: SpendVerificationContext) => boolean;
+    verifySpend: (spend: Spend, context?: SpendVerificationContext) => Promise<boolean>;
+    verifySpendSync?: (spend: Spend, context?: SpendVerificationContext) => boolean;
+}
+```
+
+See also: [Spend](./script.md#class-spend), [SpendVerificationContext](./script.md#interface-spendverificationcontext)
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
 ## Classes
 
 | |
@@ -111,6 +149,7 @@ Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](
 | [RPuzzle](#class-rpuzzle) |
 | [Script](#class-script) |
 | [ScriptEvaluationError](#class-scriptevaluationerror) |
+| [ScriptResourceLimitError](#class-scriptresourcelimiterror) |
 | [Spend](#class-spend) |
 | [UnlockingScript](#class-unlockingscript) |
 
@@ -779,6 +818,24 @@ export default class ScriptEvaluationError extends Error {
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
 ---
+### Class: ScriptResourceLimitError
+
+Raised when a caller-supplied local interpreter budget or a host representation
+limit is exhausted. This is deliberately distinct from
+`ScriptEvaluationError`: resource exhaustion does not prove script invalidity.
+
+```ts
+export default class ScriptResourceLimitError extends Error {
+    readonly resource: ScriptResource;
+    readonly limit: number | bigint;
+    readonly attempted: number | bigint;
+    constructor(resource: ScriptResource, limit: number | bigint, attempted: number | bigint)
+}
+```
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
 ### Class: Spend
 
 The Spend class represents a spend action within a Bitcoin SV transaction.
@@ -805,6 +862,7 @@ export default class Spend {
     altStack: number[][];
     ifStack: boolean[];
     memoryLimit: number;
+    readonly hasExplicitMemoryLimit: boolean;
     stackMem: number;
     altStackMem: number;
     isRelaxedOverride: boolean;
@@ -825,11 +883,13 @@ export default class Spend {
     }) 
     reset(): void 
     step(): boolean 
-    validate(): boolean 
+    validate(context?: SpendVerificationContext): boolean
+    validateWith(verifier: SpendVerifierInterface, context?: SpendVerificationContext): Promise<boolean>
+    toTransactionUint8Array(): Uint8Array
 }
 ```
 
-See also: [LockingScript](./script.md#class-lockingscript), [TransactionInput](./transaction.md#interface-transactioninput), [TransactionOutput](./transaction.md#interface-transactionoutput), [UnlockingScript](./script.md#class-unlockingscript)
+See also: [LockingScript](./script.md#class-lockingscript), [SpendVerificationContext](./script.md#interface-spendverificationcontext), [SpendVerifierInterface](./script.md#interface-spendverifierinterface), [TransactionInput](./transaction.md#interface-transactioninput), [TransactionOutput](./transaction.md#interface-transactionoutput), [UnlockingScript](./script.md#class-unlockingscript)
 
 #### Constructor
 
@@ -879,7 +939,8 @@ The outputs of the current transaction.
 + **params.lockTime**
   + The lock time of the transaction.
 + **params.memoryLimit**
-  + Optional control over script interpreter memory usage.
+  + Optional caller-supplied local interpreter budget. If omitted,
+post-Genesis validation has no arbitrary SDK memory cap.
 + **params.isRelaxed**
   + Optional. If true, disables all the unlocking script maleability restrictions consitent with Chronicle release. Maleability restrictions are neve appliced to locking scripts.
 
@@ -904,8 +965,10 @@ const spend = new Spend({
 #### Method validate
 
 ```ts
-validate(): boolean 
+validate(context?: SpendVerificationContext): boolean
 ```
+
+See also: [SpendVerificationContext](./script.md#interface-spendverificationcontext)
 
 Returns
 
@@ -919,6 +982,27 @@ if (spend.validate()) {
 } else {
   console.log("Invalid spend!");
 }
+```
+
+#### Method validateWith
+
+Validates this spend with an asynchronous pluggable backend. Backend errors are
+propagated without silently falling back to the JavaScript interpreter.
+
+```ts
+validateWith(verifier: SpendVerifierInterface, context?: SpendVerificationContext): Promise<boolean>
+```
+
+See also: [SpendVerificationContext](./script.md#interface-spendverificationcontext), [SpendVerifierInterface](./script.md#interface-spendverifierinterface)
+
+#### Method toTransactionUint8Array
+
+Serializes the ordinary transaction represented by this Spend. The source
+output is supplied separately to a Spend verifier, avoiding EF construction
+for one-input validation.
+
+```ts
+toTransactionUint8Array(): Uint8Array
 ```
 
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
@@ -1020,7 +1104,12 @@ Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](
 ---
 ## Types
 
+### Type: ScriptResource
+
+```ts
+export type ScriptResource = "stack" | "alt-stack" | "element-size"
+```
+
 ## Enums
 
 ## Variables
-

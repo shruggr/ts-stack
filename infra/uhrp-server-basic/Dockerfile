@@ -1,24 +1,23 @@
 # ── Stage 1: build ──────────────────────────────────────────
-FROM node:22-alpine AS build
+# Base version 24.18.0-alpine3.24; the digest is the authoritative build input.
+FROM node@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS build
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 COPY tsconfig.json ./
 COPY src/ ./src/
 
 RUN npm run build
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 
 # ── Stage 2: production ────────────────────────────────────
-FROM node:22-alpine
-
-RUN apk upgrade --no-cache
+FROM node@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd
 
 # Strip npm from the runtime image: the app runs via `node` (see CMD) and
-# node:22-alpine's bundled npm ships its own HIGH-CVE deps (picomatch/undici)
+# node:24-alpine's bundled npm ships its own HIGH-CVE deps (picomatch/undici)
 # that we don't need at runtime.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 

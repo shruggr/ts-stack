@@ -27,7 +27,7 @@ for (const pkg of pkgList) {
   }
 }
 
-function parseVersion (version) {
+function parseVersion(version) {
   const match = version.match(/^(\d+)\.(\d+)\.(\d+)/)
   if (!match) return null
   return {
@@ -37,11 +37,11 @@ function parseVersion (version) {
   }
 }
 
-function compareVersion (a, b) {
+function compareVersion(a, b) {
   return a.major - b.major || a.minor - b.minor || a.patch - b.patch
 }
 
-function caretUpperBound (version) {
+function caretUpperBound(version) {
   if (version.major > 0) {
     return { major: version.major + 1, minor: 0, patch: 0 }
   }
@@ -51,11 +51,8 @@ function caretUpperBound (version) {
   return { major: 0, minor: 0, patch: version.patch + 1 }
 }
 
-function acceptsWorkspaceVersion (range, wsVersion) {
-  // workspace:^ is the only `workspace:` form we allow — it publishes as `^X.Y.Z`,
-  // letting downstream consumers dedupe. `workspace:*` publishes as an exact pin
-  // and causes duplicate-install bugs across infra components, so reject it here.
-  if (range === 'workspace:^' || range === `^${wsVersion}`) return true
+function acceptsPeerVersion(range, wsVersion) {
+  if (range === `^${wsVersion}`) return true
   if (!range.startsWith('^')) return false
 
   const min = parseVersion(range.slice(1))
@@ -66,6 +63,19 @@ function acceptsWorkspaceVersion (range, wsVersion) {
 }
 
 let stale = 0
+let coverageMismatches = 0
+let runtimeToolLeaks = 0
+
+const developmentOnlyPackages = new Set([
+  '@jest/globals',
+  'jest',
+  'oxlint',
+  'supertest',
+  'ts-jest',
+  'ts2md',
+  'tsconfig-to-dual-package',
+  'typescript'
+])
 
 for (const pkg of pkgList) {
   if (!pkg.path) continue
@@ -77,12 +87,52 @@ for (const pkg of pkgList) {
     continue
   }
   const d = JSON.parse(raw)
-  for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
+  if (d.private !== true) {
+    for (const dependency of Object.keys(d.dependencies ?? {})) {
+      if (dependency.startsWith('@types/') || developmentOnlyPackages.has(dependency)) {
+        console.log(`PUBLISH SURFACE  ${d.name} exposes development-only dependency ${dependency}`)
+        runtimeToolLeaks++
+      }
+    }
+  }
+
+  const testCommand = d.scripts?.test
+  const coverageCommand = d.scripts?.['test:coverage']
+  if (typeof testCommand === 'string' && typeof coverageCommand === 'string') {
+    const missingCoverageBehaviors = ['--passWithNoTests', '--experimental-vm-modules'].filter(
+      option => testCommand.includes(option) && !coverageCommand.includes(option)
+    )
+
+    if (
+      coverageCommand.includes('--coverageReporters') &&
+      !coverageCommand.includes('--coverageReporters=lcov')
+    ) {
+      missingCoverageBehaviors.push('--coverageReporters=lcov')
+    }
+
+    if (missingCoverageBehaviors.length > 0) {
+      console.log(
+        `COVERAGE MISMATCH  ${d.name} test:coverage is missing ${missingCoverageBehaviors.join(', ')}`
+      )
+      coverageMismatches++
+    }
+  }
+
+  for (const field of [
+    'dependencies',
+    'devDependencies',
+    'peerDependencies',
+    'optionalDependencies'
+  ]) {
     if (!d[field]) continue
     for (const [dep, range] of Object.entries(d[field])) {
       const wsVersion = workspaceMap[dep]
       if (!wsVersion) continue
-      if (!acceptsWorkspaceVersion(range, wsVersion)) {
+      const valid =
+        field === 'peerDependencies'
+          ? acceptsPeerVersion(range, wsVersion)
+          : range === 'workspace:^'
+      if (!valid) {
         console.log(`STALE  ${d.name}  ${dep}  ${range}  (current: ${wsVersion})`)
         stale++
       }
@@ -103,7 +153,7 @@ for (const pkg of pkgList) {
 const located = pkgList.filter(p => p.name && p.version && p.path)
 let mismatched = 0
 
-const isPrivate = (pkgPath) => {
+const isPrivate = pkgPath => {
   try {
     return JSON.parse(readFileSync(resolve(pkgPath, 'package.json'), 'utf-8')).private === true
   } catch {
@@ -124,15 +174,31 @@ for (const child of located) {
   }
   if (!parent) continue
   if (child.version !== parent.version) {
-    console.log(`VERSION MISMATCH  ${child.name}@${child.version}  must match enclosing  ${parent.name}@${parent.version}`)
+    console.log(
+      `VERSION MISMATCH  ${child.name}@${child.version}  must match enclosing  ${parent.name}@${parent.version}`
+    )
     mismatched++
   }
 }
 
-if (stale === 0 && mismatched === 0) {
+if (stale === 0 && mismatched === 0 && coverageMismatches === 0 && runtimeToolLeaks === 0) {
   console.log('All cross-package version references up to date.')
 } else {
-  if (stale > 0) console.error(`\n${stale} stale references. Run: node scripts/sync-versions.mjs`)
-  if (mismatched > 0) console.error(`\n${mismatched} nested package(s) out of lockstep with their enclosing package. Bump them to match.`)
+  if (stale > 0)
+    console.error(
+      `\n${stale} stale references. Run: node scripts/sync-versions.mjs --workspace-only`
+    )
+  if (mismatched > 0)
+    console.error(
+      `\n${mismatched} nested package(s) out of lockstep with their enclosing package. Bump them to match.`
+    )
+  if (coverageMismatches > 0)
+    console.error(
+      `\n${coverageMismatches} coverage script(s) disagree with their package test semantics.`
+    )
+  if (runtimeToolLeaks > 0)
+    console.error(
+      `\n${runtimeToolLeaks} development-only dependency entries would leak into published runtime installs.`
+    )
   process.exit(1)
 }

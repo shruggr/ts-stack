@@ -1,19 +1,32 @@
 {
   "name": "@bsv/wallet-helper",
-  "version": "0.1.0",
-  "description": "",
-  "main": "dist/index.js",
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "version": "0.1.1",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "Wallet-backed transaction builders, script templates, and utilities for BSV applications.",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.cts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE.txt"
   ],
   "repository": {
     "type": "git",
@@ -22,36 +35,40 @@
   },
   "scripts": {
     "test": "jest --runInBand",
-    "lint:ci-disabled": "ts-standard src/**/*.ts",
-    "lint": "ts-standard --fix src/**/*.ts",
+    "test:property": "jest --runInBand --runTestsByPath src/utils/__tests__/scriptEncoding.property.test.ts",
+    "test:coverage": "jest --coverage --runInBand",
     "test:watch": "jest --watch",
-    "test:coverage-disabled": "jest --coverage",
-    "build": "tsup && tsc --emitDeclarationOnly"
+    "build": "tsdown src/index.ts --format cjs,esm --dts --sourcemap --clean --out-dir dist --tsconfig tsconfig.build.json",
+    "format:check": "pnpm --workspace-root exec prettier --check \"packages/helpers/bsv-wallet-helper/src/**/*.ts\" \"packages/helpers/bsv-wallet-helper/*.{js,json,ts}\"",
+    "lint": "oxlint src --deny-warnings",
+    "pack:check": "node ../../../scripts/check-package-artifact.mjs . --exports WalletP2PKH,TransactionBuilder,makeMockWallet",
+    "typecheck": "tsc --project tsconfig.typecheck.json"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "bsv",
+    "bitcoin",
+    "wallet",
+    "transactions",
+    "ordinals"
+  ],
+  "author": "BSV Blockchain Association",
+  "license": "SEE LICENSE IN LICENSE.txt",
   "type": "commonjs",
   "dependencies": {
-    "@bsv/wallet-toolbox-client": "^2.3.3"
+    "@bsv/wallet-toolbox-client": "workspace:^"
   },
   "devDependencies": {
+    "@bsv/sdk": "workspace:^",
     "@jest/globals": "^30.4.1",
     "@types/jest": "^30.0.0",
-    "@types/node": "^26.0.0",
+    "@types/node": "^26.1.1",
+    "fast-check": "^4.9.0",
     "jest": "^30.4.2",
-    "ts-jest": "^29.4.11",
-    "ts-standard": "^12.0.2",
+    "ts-jest": "^29.4.12",
     "tslib": "^2.8.1",
-    "tsup": "^8.5.1",
-    "typescript": "^6.0.3",
-    "@bsv/sdk": "workspace:^"
-  },
-  "ts-standard": {
-    "project": "tsconfig.eslint.json",
-    "ignore": [
-      "dist"
-    ]
+    "oxlint": "^1.75.0",
+    "tsdown": "0.22.14",
+    "typescript": "^6.0.3"
   },
   "bugs": {
     "url": "https://github.com/bsv-blockchain/ts-stack/issues"

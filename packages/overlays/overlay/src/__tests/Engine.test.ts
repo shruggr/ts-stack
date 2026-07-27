@@ -1,5 +1,4 @@
-// Note: References Engine from dist due to issues with compiled code references in Engine.ts
-import { Engine } from '../../dist/cjs/src/Engine.js'
+import { Engine } from '../Engine'
 import { LookupService } from '../LookupService'
 import { TopicManager } from '../TopicManager'
 import { Storage } from '../storage/Storage'
@@ -14,7 +13,7 @@ const mockChainTracker = {
 }
 
 // Call the method that would normally trigger syncAdvertisements
-const engineSubmit = jest.fn(async (taggedBEEF: TaggedBEEF, onSteakReady: any, mode?: string): Promise<STEAK> => {
+const engineSubmit = jest.fn(async (_taggedBEEF: TaggedBEEF, _onSteakReady: any, _mode?: string): Promise<STEAK> => {
   const result: STEAK = { tm_helloworld: { outputsToAdmit: [], coinsToRetain: [], coinsRemoved: [] } }
   return result
 })
@@ -309,6 +308,37 @@ describe('BSV Overlay Services Engine', () => {
     })
   })
   describe('handleNewMerkleProof tests', () => {
+    it('persists a replacement proof when the stored BEEF is already mined', async () => {
+      const tx = Transaction.fromHexBEEF(beef37abad0)
+      const txid = tx.id('hex')
+      const output: Output = {
+        txid,
+        outputIndex: 0,
+        outputScript: tx.outputs[0].lockingScript.toBinary(),
+        topic: 'hello',
+        satoshis: tx.outputs[0].satoshis,
+        beef: tx.toBEEF(),
+        spent: false,
+        outputsConsumed: [],
+        consumedBy: [],
+        score: Date.now()
+      }
+      const updateTransactionBEEF = jest.fn(async () => undefined)
+      mockStorageEngine.findOutputsForTransaction = jest.fn(async () => [output])
+      mockStorageEngine.updateTransactionBEEF = updateTransactionBEEF
+      const engine = new Engine(
+        { Hello: mockTopicManager },
+        { Hello: mockLookupService },
+        mockStorageEngine,
+        mockChainTracker
+      )
+
+      if (tx.merklePath === undefined) throw new Error('improper test setup')
+      await engine.handleNewMerkleProof(txid, tx.merklePath)
+
+      expect(updateTransactionBEEF).toHaveBeenCalledWith(txid, tx.toBEEF())
+    })
+
     it('0 simple proof', async () => {
       const beef = beef27c8f1
       const txid = txid27c8f
@@ -357,7 +387,7 @@ describe('BSV Overlay Services Engine', () => {
 
     it('1 recurse proof', async () => {
       const outputs: Output[] = []
-      const findOutput = (txid: string, outputIndex: number, includeBEEF?: boolean): Output => {
+      const findOutput = (txid: string, outputIndex: number, _includeBEEF?: boolean): Output => {
         const i = outputs.findIndex(o => o.txid === txid && o.outputIndex === outputIndex)
         if (i < 0) throw new Error(`missing output ${txid} ${outputIndex}`)
         return outputs[i]
@@ -387,10 +417,10 @@ describe('BSV Overlay Services Engine', () => {
 
       mockLookupService.lookup = jest.fn(async () => [{ txid: txid17d182, outputIndex: 0, history: 1 }])
       const newBEEF: Record<string, string> = {}
-      mockStorageEngine.findOutput = jest.fn(async (txid: string, outputIndex: number, topic?: string, spent?: boolean, includeBEEF?: boolean) => {
+      mockStorageEngine.findOutput = jest.fn(async (txid: string, outputIndex: number, _topic?: string, _spent?: boolean, _includeBEEF?: boolean) => {
         return findOutput(txid, outputIndex, true)
       })
-      mockStorageEngine.findOutputsForTransaction = jest.fn(async (txid: string, includeBEEF?: boolean) => {
+      mockStorageEngine.findOutputsForTransaction = jest.fn(async (txid: string, _includeBEEF?: boolean) => {
         const os = outputs.filter(o => o.txid === txid)
         return os
       })
@@ -423,7 +453,12 @@ describe('BSV Overlay Services Engine', () => {
 
       const mp37abad = Transaction.fromHexBEEF(beef37abad0).merklePath
       await engine.handleNewMerkleProof(txid37abad, mp37abad)
-      expect(Object.keys(newBEEF).length).toBe(0)
+      expect(newBEEF[`${txid37abad}`]).toBe(beef37abad0)
+      expect(newBEEF[`${txid877734}`].length).toBeGreaterThan(beef8777340.length)
+      expect(newBEEF[`${txid509f5e}`].length).toBeGreaterThan(beef509f5e0.length)
+      expect(newBEEF[`${txid942620}`].length).toBeGreaterThan(beef9426200.length)
+      expect(newBEEF[`${txid17d182}`].length).toBeGreaterThan(beef17d1820.length)
+      expect(Object.keys(newBEEF)).toHaveLength(5)
 
       const mp877734 = Transaction.fromHexBEEF(beef8777340).merklePath
       await engine.handleNewMerkleProof(txid877734, mp877734)
@@ -431,7 +466,7 @@ describe('BSV Overlay Services Engine', () => {
       expect(newBEEF[`${txid509f5e}`].length).toBeGreaterThan(beef509f5e0.length)
       expect(newBEEF[`${txid942620}`].length).toBeGreaterThan(beef9426200.length)
       expect(newBEEF[`${txid17d182}`].length).toBeGreaterThan(beef17d1820.length)
-      expect(Object.keys(newBEEF).length).toBe(4)
+      expect(Object.keys(newBEEF)).toHaveLength(5)
 
       const mp509f5e = Transaction.fromHexBEEF(beef509f5e0).merklePath
       await engine.handleNewMerkleProof(txid509f5e, mp509f5e)
@@ -439,7 +474,7 @@ describe('BSV Overlay Services Engine', () => {
       expect(newBEEF[`${txid509f5e}`]).toBe(beef509f5e0)
       expect(newBEEF[`${txid942620}`].length).toBeGreaterThan(beef9426200.length)
       expect(newBEEF[`${txid17d182}`].length).toBeGreaterThan(beef17d1820.length)
-      expect(Object.keys(newBEEF).length).toBe(4)
+      expect(Object.keys(newBEEF)).toHaveLength(5)
 
       const mp942620 = Transaction.fromHexBEEF(beef9426200).merklePath
       await engine.handleNewMerkleProof(txid942620, mp942620)
@@ -447,7 +482,7 @@ describe('BSV Overlay Services Engine', () => {
       expect(newBEEF[`${txid509f5e}`]).toBe(beef509f5e0)
       expect(newBEEF[`${txid942620}`]).toBe(beef9426200)
       expect(newBEEF[`${txid17d182}`].length).toBeGreaterThan(beef17d1820.length)
-      expect(Object.keys(newBEEF).length).toBe(4)
+      expect(Object.keys(newBEEF)).toHaveLength(5)
 
       const mp17d182 = Transaction.fromHexBEEF(beef17d1820).merklePath
       await engine.handleNewMerkleProof(txid17d182, mp17d182)
@@ -455,7 +490,7 @@ describe('BSV Overlay Services Engine', () => {
       expect(newBEEF[`${txid509f5e}`]).toBe(beef509f5e0)
       expect(newBEEF[`${txid942620}`]).toBe(beef9426200)
       expect(newBEEF[`${txid17d182}`]).toBe(beef17d1820)
-      expect(Object.keys(newBEEF).length).toBe(4)
+      expect(Object.keys(newBEEF)).toHaveLength(5)
     })
   })
 
@@ -542,12 +577,20 @@ describe('BSV Overlay Services Engine', () => {
         // still gate the broadcast (this is the rejected-transfer shape).
         mockStorageEngine.findOutput = jest.fn(async () => mockOutput)
         mockTopicManager.identifyAdmissibleOutputs = jest.fn(async () => {
-          throw new Error('rule violation')
+          throw new Error('rule violation\r\nFORGED')
         })
         const broadcaster = makeBroadcaster()
         const engine = makeEngine(broadcaster)
+        const logger = {
+          ...console,
+          error: jest.fn()
+        }
+        engine.logger = logger
         await engine.submit({ beef: exampleBeef, topics: ['Hello'] })
         expect(broadcaster.broadcast).not.toHaveBeenCalled()
+        const message = logger.error.mock.calls[0][0] as string
+        expect(message).toContain('rule violation\\r\\nFORGED')
+        expect(message).not.toMatch(/[\r\n\u2028\u2029]/)
       })
 
       it('broadcasts a consume-only transaction that retains nothing (history purge)', async () => {
@@ -963,7 +1006,7 @@ describe('BSV Overlay Services Engine', () => {
         await expect(engine.lookup({
           service: 'HelloWorld',
           query: { name: 'Bob' }
-        })).rejects.toThrow()
+        })).rejects.toThrow('Lookup service not found for provider: HelloWorld')
       })
       it('Calls the lookup function from the lookup service', async () => {
         // TODO: Make the default storage engine return something...?
@@ -1122,7 +1165,7 @@ describe('BSV Overlay Services Engine', () => {
         return true
       })
       it('Invokes the history selector function with the correct data', async () => {
-        const mockedHistorySelector = jest.fn(async (beef, outputIndex, currentDepth) => {
+        const mockedHistorySelector = jest.fn(async (_beef, _outputIndex, currentDepth) => {
           if (currentDepth !== 2) {
             return true
           }
@@ -1158,7 +1201,7 @@ describe('BSV Overlay Services Engine', () => {
         expect(mockedHistorySelector).toHaveBeenCalled()
       })
       it('Returns undefined if history should not be traversed', async () => {
-        const mockedHistorySelector = jest.fn(async (beef, outputIndex, currentDepth) => {
+        const mockedHistorySelector = jest.fn(async (_beef, _outputIndex, _currentDepth) => {
           return false
         })
         mockLookupService.lookup = jest.fn(async () => [{

@@ -6,7 +6,6 @@ import {
   SendWithResult,
   SignableTransaction,
   TXIDHexString,
-  Script,
   Transaction,
   Validation
 } from '@bsv/sdk'
@@ -31,7 +30,7 @@ export interface CreateActionResultX extends CreateActionResult {
   notDelayedResults?: ReviewActionResult[]
 }
 
-export async function createAction (
+export async function createAction(
   wallet: Wallet,
   auth: AuthId,
   vargs: Validation.ValidCreateActionArgs
@@ -57,21 +56,22 @@ export async function createAction (
     r.txid = prior.tx.id('hex')
     const beef = new Beef()
     if (prior.dcr.inputBeef != null) {
-      const inputBeef = prior.dcr.inputBeef instanceof Uint8Array
-        ? Beef.fromBinaryView(prior.dcr.inputBeef)
-        : Beef.fromBinary(prior.dcr.inputBeef)
+      const inputBeef =
+        prior.dcr.inputBeef instanceof Uint8Array
+          ? Beef.fromBinaryView(prior.dcr.inputBeef)
+          : Beef.fromBinary(prior.dcr.inputBeef)
       beef.mergeBeef(inputBeef)
     }
     beef.mergeTransaction(prior.tx)
     logger?.log('merged beef')
 
-    verifyUnlockScripts(r.txid, beef)
+    await verifyUnlockScripts(r.txid, beef, wallet.scriptVerifier)
     logger?.log('verified unlock scripts')
 
     r.noSendChange = prior.dcr.noSendChangeOutputVouts?.map(vout => `${r.txid}.${vout}`)
     beef.atomicTxid = r.txid
     setResultBeef(r, beef)
-    if (!vargs.options.returnTXIDOnly) r.tx = beef.toBinaryAtomic(r.txid)
+    if (!vargs.options.returnTXIDOnly) r.tx = beef.toUint8ArrayAtomic(r.txid)
   }
 
   const { sendWithResults, notDelayedResults } = await processAction(prior, wallet, auth, vargs)
@@ -83,10 +83,10 @@ export async function createAction (
   return r
 }
 
-async function createNewTx (wallet: Wallet, vargs: Validation.ValidCreateActionArgs): Promise<PendingSignAction> {
+async function createNewTx(wallet: Wallet, vargs: Validation.ValidCreateActionArgs): Promise<PendingSignAction> {
   const logger = vargs.logger
   const storageArgs = removeUnlockScripts(vargs)
-  const dcr = await wallet.storage.createAction(storageArgs)
+  const dcr = (await wallet.actionBatch.plan(storageArgs)) ?? (await wallet.storage.createAction(storageArgs))
 
   const reference = dcr.reference
 
@@ -98,7 +98,7 @@ async function createNewTx (wallet: Wallet, vargs: Validation.ValidCreateActionA
   return prior
 }
 
-function makeSignableTransactionResult (
+function makeSignableTransactionResult(
   prior: PendingSignAction,
   wallet: Wallet,
   args: Validation.ValidCreateActionArgs
@@ -111,7 +111,7 @@ function makeSignableTransactionResult (
     noSendChange: args.isNoSend ? prior.dcr.noSendChangeOutputVouts?.map(vout => `${txid}.${vout}`) : undefined,
     signableTransaction: {
       reference: prior.dcr.reference,
-      tx: makeSignableTransactionBeef(prior.tx, prior.dcr.inputBeef)
+      tx: makeSignableTransactionBeef(prior.tx)
     }
   }
 
@@ -120,19 +120,23 @@ function makeSignableTransactionResult (
   return r
 }
 
-function makeSignableTransactionBeef (tx: Transaction, inputBEEF: number[] | Uint8Array): number[] {
+function makeSignableTransactionBeef(tx: Transaction): number[] {
   // This is a special case beef for transaction signing.
   // We only need the transaction being signed, and for each input, the raw source transaction.
   const beef = new Beef()
   for (const input of tx.inputs) {
-    if (input.sourceTransaction == null) { throw new WERR_INTERNAL('Every signableTransaction input must have a sourceTransaction') }
+    if (input.sourceTransaction == null) {
+      throw new WERR_INTERNAL('Every signableTransaction input must have a sourceTransaction')
+    }
     beef.mergeRawTx(input.sourceTransaction.toUint8Array())
   }
   beef.mergeRawTx(tx.toUint8Array())
+  // BRC-100 historically returns number[] here. Keep that observable shape;
+  // Wallet Wire converts it to compact bytes only inside negotiated substrates.
   return beef.toBinaryAtomic(tx.id('hex'))
 }
 
-function removeUnlockScripts (args: Validation.ValidCreateActionArgs) {
+function removeUnlockScripts(args: Validation.ValidCreateActionArgs) {
   let storageArgs = args
   if (!storageArgs.inputs.every(i => i.unlockingScript === undefined)) {
     // Never send unlocking scripts to storage, all it needs is the script length.
@@ -149,31 +153,26 @@ function removeUnlockScripts (args: Validation.ValidCreateActionArgs) {
   return storageArgs
 }
 
-export async function processAction (
+export async function processAction(
   prior: PendingSignAction | undefined,
   wallet: Wallet,
   auth: AuthId,
   vargs: Validation.ValidProcessActionArgs
 ): Promise<StorageProcessActionResults> {
+  const batchResult = await wallet.actionBatch.process(prior, vargs)
+  if (batchResult != null) return batchResult
   const args: StorageProcessActionArgs = {
     isNewTx: vargs.isNewTx,
     isSendWith: vargs.isSendWith,
     isNoSend: vargs.isNoSend,
     isDelayed: vargs.isDelayed,
-    reference: (prior != null) ? prior.reference : undefined,
-    txid: (prior != null) ? prior.tx.id('hex') : undefined,
-    rawTx: (prior != null) ? prior.tx.toUint8Array() : undefined,
+    reference: prior != null ? prior.reference : undefined,
+    txid: prior != null ? prior.tx.id('hex') : undefined,
+    rawTx: prior != null ? prior.tx.toUint8Array() : undefined,
     sendWith: vargs.isSendWith ? vargs.options.sendWith : [],
     logger: vargs.logger
   }
   const r: StorageProcessActionResults = await wallet.storage.processAction(args)
 
   return r
-}
-
-function makeDummyTransactionForOutputSatoshis (vout: number, satoshis: number): Transaction {
-  const tx = new Transaction()
-  for (let i = 0; i < vout; i++) tx.addOutput({ lockingScript: new Script(), satoshis: 0 })
-  tx.addOutput({ lockingScript: new Script(), satoshis })
-  return tx
 }
