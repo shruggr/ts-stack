@@ -1,6 +1,6 @@
 {
-  "name": "@bsv/auth-express-middleware",
-  "version": "2.1.2",
+  "name": "@bopen-io/auth-express-middleware",
+  "version": "2.1.3",
   "sideEffects": false,
   "engines": {
     "node": ">=22"
@@ -8,7 +8,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "BSV Blockchain mutual-authentication express middleware",
+  "description": "Interim repack of @bsv/auth-express-middleware with the response-session binding fix (bsv-blockchain/ts-stack#368)",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bsv-blockchain/ts-stack.git",
