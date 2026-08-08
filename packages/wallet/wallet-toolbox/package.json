@@ -1,6 +1,6 @@
 {
-  "name": "@bsv/wallet-toolbox",
-  "version": "2.6.2",
+  "name": "@bopen-io/wallet-toolbox",
+  "version": "2.6.2-brc153.5",
   "sideEffects": false,
   "type": "commonjs",
   "engines": {
@@ -9,7 +9,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "BRC100 conforming wallet, wallet storage and wallet signer components",
+  "description": "Interim repack of @bsv/wallet-toolbox with BRC-153 synthetic reference labels (bsv-blockchain/ts-stack#446)",
   "main": "./out/src/index.js",
   "types": "./out/src/index.d.ts",
   "exports": {
@@ -24,8 +24,12 @@
       "default": "./out/src/sdk/index.js"
     },
     "./out/src/*": {
-      "types": "./out/src/*.d.ts",
-      "require": "./out/src/*.js"
+      "types": [
+        "./out/src/*.d.ts",
+        "./out/src/*"
+      ],
+      "require": "./out/src/*",
+      "default": "./out/src/*"
     },
     "./package.json": "./package.json"
   },
@@ -67,7 +71,7 @@
     "pack:check": "pnpm build && node ../../../scripts/check-package-artifact.mjs . --modes cjs --exports Wallet,WalletSigner,WalletStorageManager,StorageClient,StorageKnex,Services,Setup,WalletPermissionsManager,WalletSettingsManager,sdk --entry-exports \"./out/src/sdk=WalletError|WERR_BAD_REQUEST|WERR_INTERNAL|WERR_INVALID_PARAMETER|WERR_UNAUTHORIZED\"",
     "typecheck": "tsc --build --pretty false && tsc --project examples/tsconfig.json --pretty false && tsc --project operator/tsconfig.json --noEmit --pretty false",
     "build": "tsc --build",
-    "prepublishOnly": "pnpm build",
+    "prepublishOnly": "node -e \"require('fs').accessSync('out/src/utility/brc153ReferenceLabels.js')\"",
     "doc": "ts2md",
     "sync-versions": "node syncVersions.js"
   },
@@ -76,8 +80,8 @@
   },
   "homepage": "https://github.com/bsv-blockchain/ts-stack/tree/main/packages/wallet/wallet-toolbox#readme",
   "dependencies": {
-    "@bsv/auth-express-middleware": "workspace:^",
-    "@bsv/payment-express-middleware": "workspace:^",
+    "@bsv/auth-express-middleware": "^2.2.0",
+    "@bsv/payment-express-middleware": "^2.1.5",
     "@types/express": "^5.0.6",
     "better-sqlite3": "^13.0.2",
     "body-parser": "^2.3.0",
@@ -91,8 +95,8 @@
     "ws": "^8.21.1"
   },
   "devDependencies": {
-    "@bsv/sdk": "workspace:^",
-    "@bsv/verifast": "workspace:^",
+    "@bsv/sdk": "^2.3.1",
+    "@bsv/verifast": "^0.3.4",
     "@jest/globals": "^30.4.1",
     "@types/body-parser": "^1.19.6",
     "@types/cors": "^2.8.19",

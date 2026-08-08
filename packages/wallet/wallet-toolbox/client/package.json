@@ -1,6 +1,6 @@
 {
-  "name": "@bsv/wallet-toolbox-client",
-  "version": "2.6.2",
+  "name": "@bopen-io/wallet-toolbox-client",
+  "version": "2.6.2-brc153.5",
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -9,7 +9,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Browser-safe BRC-100 wallet, storage, signer, and services components",
+  "description": "Interim repack of @bsv/wallet-toolbox-client with BRC-153 synthetic reference labels (bsv-blockchain/ts-stack#446)",
   "main": "./out/index.client.cjs",
   "module": "./out/index.client.mjs",
   "browser": "./out/index.client.mjs",
@@ -77,7 +77,7 @@
     }
   },
   "devDependencies": {
-    "@bsv/sdk": "workspace:^",
+    "@bsv/sdk": "^2.3.1",
     "@types/node": "^26.1.2",
     "@typescript/native": "npm:typescript@7.0.2",
     "@vitest/coverage-v8": "4.1.10",
