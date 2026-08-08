@@ -1,6 +1,6 @@
 {
-  "name": "@bsv/wallet-toolbox-client",
-  "version": "2.15.0",
+  "name": "@bopen-io/wallet-toolbox-client",
+  "version": "2.15.0-bopen.1",
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -9,7 +9,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Browser-safe BRC-100 wallet, storage, signer, and services components",
+  "description": "Interim repack of @bsv/wallet-toolbox-client 2.15.0 (bsv-blockchain/ts-stack#719, #722, #723)",
   "main": "./out/index.client.cjs",
   "module": "./out/index.client.mjs",
   "browser": "./out/index.client.mjs",
@@ -60,7 +60,7 @@
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --project tsconfig.typecheck.json",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "node -e \"require('fs').accessSync('out/index.client.mjs')\""
   },
   "bugs": {
     "url": "https://github.com/bsv-blockchain/ts-stack/issues"
@@ -80,7 +80,7 @@
     }
   },
   "devDependencies": {
-    "@bsv/sdk": "workspace:^",
+    "@bsv/sdk": "^2.3.1",
     "@types/node": "^26.1.2",
     "@typescript/native": "npm:typescript@7.0.2",
     "@vitest/coverage-v8": "4.1.11",
