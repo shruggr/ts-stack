@@ -31,6 +31,14 @@ attention to changes that materially alter behavior or extend functionality.
 - Paged `StorageKnex` find queries and the `get*ForUser` sync queries order rows
   by key. Without an order, Postgres could return consecutive LIMIT/OFFSET pages
   in different orders, so `getSyncChunk` repeated some rows and skipped others.
+- `StorageServer.app` is public, so a host can mount the storage server in its
+  own Express application (`hostApp.use('/storage', server.app)`) instead of
+  calling `start()`. `port` is optional and only required by `start()`.
+- `preRpcMiddleware` adds Express handlers on `POST /` after authentication,
+  the authenticated rate limit and payment, immediately before JSON-RPC
+  dispatch. A handler that responds stops the call before dispatch.
+- `publicRoutes: false` removes the unauthenticated `GET /`, `/robots.txt` and
+  `/healthz` routes. Defaults are unchanged.
 
 - `WalletPermissionsManager` retires no-send transaction ownership and reference
   aliases when `createAction` or `signAction` reports them as `sending` or
