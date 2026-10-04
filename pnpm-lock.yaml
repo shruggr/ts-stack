@@ -1694,11 +1694,11 @@ importers:
   packages/wallet/wallet-toolbox:
     dependencies:
       '@bsv/auth-express-middleware':
-        specifier: workspace:^
-        version: link:../../middleware/auth-express-middleware
+        specifier: ^2.2.9
+        version: 2.2.9(@bsv/sdk@packages+sdk)(@types/express@5.0.6)(express@5.2.1)
       '@bsv/payment-express-middleware':
-        specifier: workspace:^
-        version: link:../../middleware/payment-express-middleware
+        specifier: ^2.1.9
+        version: 2.1.9(@bsv/sdk@packages+sdk)(@types/express@5.0.6)(express@5.2.1)
       '@noble/hashes':
         specifier: 2.4.0
         version: 2.4.0
@@ -1740,8 +1740,8 @@ importers:
         specifier: workspace:^
         version: link:../../sdk
       '@bsv/verifast':
-        specifier: workspace:^
-        version: link:../../verifast
+        specifier: ^0.3.7
+        version: 0.3.7(@bsv/sdk@packages+sdk)
       '@jest/globals':
         specifier: ^30.5.1
         version: 30.5.1
@@ -2477,6 +2477,28 @@ packages:
 
   '@braintree/sanitize-url@7.1.2':
     resolution: {integrity: sha512-jigsZK+sMF/cuiB7sERuo9V7N9jx+dhmHHnQyDSVdpZwVutaBu7WvNYqMDLSgFgfB30n452TP3vjDAvFC973mA==}
+
+  '@bsv/auth-express-middleware@2.2.9':
+    resolution: {integrity: sha512-7Le6Kv3NmUmYTbF50t9Pr/TSM4jOSvidLdcfjoKTL5lvbVg6JR5Mds5jwEJR7uQWS3cCd+yDnNFsEWKPQjByKg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@bsv/sdk': ^2.8.5 || ^3.0.0
+      '@types/express': '>=4.17.0 <6'
+      express: '>=4.18.0 <6'
+
+  '@bsv/payment-express-middleware@2.1.9':
+    resolution: {integrity: sha512-MqHNwcryLNL3OuUW9O2SrYnroOtde6RLkdHSucrh+wlJ1dOFW/c9ZlZN5Zfn7QuJ/nHBvLBXC9lor+ah5vtEjA==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@bsv/sdk': ^2.1.6 || ^3.0.0
+      '@types/express': '>=4.17.0 <6'
+      express: '>=4.18.0 <6'
+
+  '@bsv/verifast@0.3.7':
+    resolution: {integrity: sha512-rGBnW4dqZUz3kzJ4SbWUe1wBNFziBhkCs4aHYhstNE+DqbBko72/Sey579kjf/jhLS3ZWKwGipdwTNG3TkAq2Q==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@bsv/sdk': ^2.1.8 || ^3.0.0
 
   '@chainsafe/as-chacha20poly1305@0.1.0':
     resolution: {integrity: sha512-BpNcL8/lji/GM3+vZ/bgRWqJ1q5kwvTFmGPk7pxm/QQZDbaMI98waOHjEymTjq2JmdD/INdNBFOVSyJofXg7ew==}
@@ -9811,6 +9833,23 @@ snapshots:
   '@braidai/lang@1.1.2': {}
 
   '@braintree/sanitize-url@7.1.2': {}
+
+  '@bsv/auth-express-middleware@2.2.9(@bsv/sdk@packages+sdk)(@types/express@5.0.6)(express@5.2.1)':
+    dependencies:
+      '@bsv/sdk': link:packages/sdk
+      '@types/express': 5.0.6
+      express: 5.2.1
+      mime-types: 3.0.2
+
+  '@bsv/payment-express-middleware@2.1.9(@bsv/sdk@packages+sdk)(@types/express@5.0.6)(express@5.2.1)':
+    dependencies:
+      '@bsv/sdk': link:packages/sdk
+      '@types/express': 5.0.6
+      express: 5.2.1
+
+  '@bsv/verifast@0.3.7(@bsv/sdk@packages+sdk)':
+    dependencies:
+      '@bsv/sdk': link:packages/sdk
 
   '@chainsafe/as-chacha20poly1305@0.1.0': {}
 
