@@ -1,6 +1,6 @@
 {
   "name": "@bopen-io/wallet-toolbox-client",
-  "version": "2.14.6",
+  "version": "2.14.7",
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -9,7 +9,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Interim repack of @bsv/wallet-toolbox-client with bsv-blockchain/ts-stack#774 and #775",
+  "description": "Interim repack of @bsv/wallet-toolbox-client with bsv-blockchain/ts-stack#774, #775 and #792",
   "main": "./out/index.client.cjs",
   "module": "./out/index.client.mjs",
   "browser": "./out/index.client.mjs",

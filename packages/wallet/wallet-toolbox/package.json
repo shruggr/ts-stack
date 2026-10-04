@@ -1,6 +1,6 @@
 {
   "name": "@bopen-io/wallet-toolbox",
-  "version": "2.14.6",
+  "version": "2.14.7",
   "sideEffects": false,
   "type": "commonjs",
   "engines": {
@@ -9,7 +9,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Interim repack of @bsv/wallet-toolbox with bsv-blockchain/ts-stack#774 and #775",
+  "description": "Interim repack of @bsv/wallet-toolbox with bsv-blockchain/ts-stack#774, #775 and #792",
   "main": "./out/src/index.js",
   "types": "./out/src/index.d.ts",
   "exports": {
