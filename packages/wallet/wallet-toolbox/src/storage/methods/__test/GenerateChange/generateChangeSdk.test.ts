@@ -9,7 +9,8 @@ import {
   generateChangeSdkMakeStorage,
   GenerateChangeSdkParams,
   GenerateChangeSdkResult,
-  maxChangeOutputsPerTransaction
+  maxChangeOutputsPerTransaction,
+  validateGenerateChangeSdkResult
 } from '../../generateChange'
 
 describe('generateChange tests', () => {
@@ -1109,6 +1110,15 @@ describe('generateChange tests', () => {
       expect(r.fee).toBe(194)
       expect(r.fee).toBeGreaterThan(Math.ceil((r.size / 1000) * 1))
       expectTransactionSize(params, r)
+      expect(validateGenerateChangeSdkResult({ ...params, surplusToFee: false }, r).ok).toBe(false)
+      expect(validateGenerateChangeSdkResult(params, { ...r, fee: r.fee - 1 }).ok).toBe(false)
+      expect(
+        validateGenerateChangeSdkResult(params, {
+          ...r,
+          fee: r.fee - 1,
+          changeOutputs: [{ satoshis: 1, lockingScriptLength: 25 }]
+        }).ok
+      ).toBe(false)
     }
   )
 
