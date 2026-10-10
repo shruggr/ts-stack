@@ -4,6 +4,42 @@ This document captures the history of significant changes to the wallet-toolbox 
 The git commit history contains the details but is unable to draw
 attention to changes that materially alter behavior or extend functionality.
 
+## wallet-toolbox 2.14.7
+
+- BEEF requests and schema-declared storage response bytes use the existing
+  negotiated compact binary JSON codec. Legacy peers retain numeric-array
+  JSON and identical transaction/proof bytes. Existing authentication and
+  payload ceilings remain unchanged; no API or database migration is required.
+
+- BRC-177 anchors cover both the protected action and an economic reclaim.
+  Protected actions keep their only managed input bound to the named anchor,
+  create no wallet change, and pay the bounded reclaim surplus as miner fee.
+  Ordinary actions retain their existing change planning. No API, wire or
+  database migration is required.
+
+## wallet-toolbox 2.14.6
+
+- UMP support pins anchor verified update lineage. Password and token updates
+  supersede the pinned predecessor, including multi-hop updates and recovery-hash
+  continuity. Unrelated historical continuations cannot override the anchor.
+  Competing descendants remain indeterminate rather than falling back to a spent
+  pin. No API or schema migration is required.
+
+- Every retained token spend proves control through its unlocking script,
+  including confirmed updates and presentation/recovery-hash rotation. Funding
+  paths do not establish a token-update lineage.
+
+- Explicit overlay history is linked past confirmed Merkle anchors. Deploy the
+  UMP history decider and engine retention fix with this client patch; missing
+  pin ancestry remains indeterminate rather than selecting an unrelated continuation.
+
+- WAB faucet redemption accepts the local signer's independently validated
+  service charge and derived change, with exact SDK transaction binding. Empty
+  wallets no longer reject legitimate fee outputs financed by the faucet input.
+  Upgrade the SDK alongside the toolbox to enable the new capability. Older SDK
+  peers retain strict behavior; serialization discards local output authority.
+  Signup interruption/retry persistence remains unchanged.
+
 ## wallet-toolbox 2.14.5
 
 - `WalletPermissionsManager` retires no-send transaction ownership and reference
