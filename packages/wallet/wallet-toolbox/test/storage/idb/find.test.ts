@@ -2,6 +2,8 @@ import { _tu, TestSetup1 } from '../../utils/TestUtilsWalletStorage'
 import { sdk, StorageProvider, StorageProviderOptions } from '../../../src/index.client'
 
 import { StorageIdb } from '../../../src/storage/StorageIdb'
+import { StorageKnex } from '../../../src/storage/StorageKnex'
+import { knex } from 'knex'
 
 import 'fake-indexeddb/auto'
 
@@ -14,12 +16,26 @@ describe('idb find tests', () => {
 
   beforeEach(async () => {
     const options: StorageProviderOptions = StorageProvider.createStorageBaseOptions(chain)
-    const storage = new StorageIdb(options)
-    await storage.dropAllData()
-    await storage.migrate('idb find tests', '1'.repeat(64))
-    await storage.makeAvailable()
-    const setup = await _tu.createTestSetup1(storage)
-    setups = [{ setup, storage }]
+    const stores = [
+      new StorageIdb(options),
+      new StorageKnex({
+        ...options,
+        knex: knex({
+          client: 'better-sqlite3',
+          connection: { filename: ':memory:' },
+          useNullAsDefault: true,
+          pool: { min: 1, max: 1 }
+        })
+      })
+    ]
+    setups = []
+    for (const storage of stores) {
+      await storage.dropAllData()
+      await storage.migrate('idb find tests', '1'.repeat(64))
+      await storage.makeAvailable()
+      const setup = await _tu.createTestSetup1(storage)
+      setups.push({ setup, storage })
+    }
   })
 
   afterEach(async () => {
@@ -174,25 +190,26 @@ describe('idb find tests', () => {
       expect(await storage.findOutputTagMaps({ partial: { outputId: setup.u1tx1o0.outputId }, tagIds: [] })).toEqual(
         rows.filter(row => row.outputId === setup.u1tx1o0.outputId)
       )
-      if (!(storage instanceof StorageIdb)) throw new Error('IndexedDB fixture required')
-      const owned: typeof rows = []
-      await storage.filterOutputTagMaps(
-        { partial: {}, tagIds: [] },
-        row => {
-          owned.push(row)
-        },
-        setup.u1.userId
-      )
-      expect(owned).toEqual(rows)
-      const foreign: typeof rows = []
-      await storage.filterOutputTagMaps(
-        { partial: {}, tagIds: [] },
-        row => {
-          foreign.push(row)
-        },
-        setup.u2.userId
-      )
-      expect(foreign).toEqual([])
+      if (storage instanceof StorageIdb) {
+        const owned: typeof rows = []
+        await storage.filterOutputTagMaps(
+          { partial: {}, tagIds: [] },
+          row => {
+            owned.push(row)
+          },
+          setup.u1.userId
+        )
+        expect(owned).toEqual(rows)
+        const foreign: typeof rows = []
+        await storage.filterOutputTagMaps(
+          { partial: {}, tagIds: [] },
+          row => {
+            foreign.push(row)
+          },
+          setup.u2.userId
+        )
+        expect(foreign).toEqual([])
+      }
     }
   })
 
