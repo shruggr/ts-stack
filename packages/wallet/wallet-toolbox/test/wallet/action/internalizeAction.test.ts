@@ -876,7 +876,7 @@ describe('internalizeAction broadcast of transactions new to the user', () => {
     recipient: Wallet,
     satoshis: number,
     labels: string[]
-  ): Promise<{ txid: string; tx: number[]; output: InternalizeOutput }> {
+  ): Promise<{ txid: string; tx: InternalizeActionArgs['tx']; output: InternalizeOutput }> {
     const derivationPrefix = randomBytesBase64(16)
     const derivationSuffix = randomBytesBase64(16)
     const payee = sender.keyDeriver.derivePublicKey(
