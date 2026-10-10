@@ -6,6 +6,10 @@ attention to changes that materially alter behavior or extend functionality.
 
 ## wallet-toolbox 2.14.7
 
+- IndexedDB empty certificate certifier/type, transaction status and output-tag
+  ID arrays mean no optional filter, matching Knex. Nonempty arrays, partial
+  predicates and user ownership remain enforced; no schema migration is required.
+
 - BEEF requests and schema-declared storage response bytes use the existing
   negotiated compact binary JSON codec. Legacy peers retain numeric-array
   JSON and identical transaction/proof bytes. Existing authentication and

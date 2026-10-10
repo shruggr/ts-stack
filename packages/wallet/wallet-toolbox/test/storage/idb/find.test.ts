@@ -72,6 +72,15 @@ describe('idb find tests', () => {
           types: [setup.u1cert2.type]
         })
       ).toHaveLength(1)
+      expect(
+        await storage.findCertificates({ partial: {}, certifiers: [setup.u1cert1.certifier], types: [] })
+      ).toHaveLength(1)
+      expect(
+        await storage.findCertificates({ partial: { userId: setup.u1.userId }, certifiers: [], types: [] })
+      ).toHaveLength(3)
+      expect(
+        await storage.findCertificates({ partial: { userId: setup.u2.userId }, certifiers: [], types: [] })
+      ).toEqual([])
     }
   })
 
@@ -117,8 +126,21 @@ describe('idb find tests', () => {
   })
 
   test('6 find Transaction', async () => {
-    for (const { storage, setup: _setup } of setups) {
-      expect(await storage.findTransactions({ partial: {} })).toHaveLength(3)
+    for (const { storage, setup } of setups) {
+      const rows = await storage.findTransactions({ partial: {} })
+      expect(rows).toHaveLength(3)
+      expect(await storage.findTransactions({ partial: {}, status: [] })).toEqual(rows)
+      const status = rows[0].status
+      expect(await storage.findTransactions({ partial: {}, status: [status] })).toEqual(
+        rows.filter(row => row.status === status)
+      )
+      expect(await storage.findTransactions({ partial: { userId: setup.u1.userId }, status: [] })).toEqual(
+        rows.filter(row => row.userId === setup.u1.userId)
+      )
+      expect(await storage.findTransactions({ partial: { userId: setup.u2.userId }, status: [] })).toEqual(
+        rows.filter(row => row.userId === setup.u2.userId)
+      )
+      expect(await storage.findTransactions({ partial: { userId: 99 }, status: [] })).toEqual([])
     }
   })
 
@@ -141,8 +163,36 @@ describe('idb find tests', () => {
   })
 
   test('10 find OutputTagMap', async () => {
-    for (const { storage, setup: _setup } of setups) {
-      expect(await storage.findOutputTagMaps({ partial: {} })).toHaveLength(3)
+    for (const { storage, setup } of setups) {
+      const rows = await storage.findOutputTagMaps({ partial: {} })
+      expect(rows).toHaveLength(3)
+      expect(await storage.findOutputTagMaps({ partial: {}, tagIds: [] })).toEqual(rows)
+      expect(await storage.findOutputTagMaps({ partial: {}, tagIds: [setup.u1tag1.outputTagId] })).toEqual(
+        rows.filter(row => row.outputTagId === setup.u1tag1.outputTagId)
+      )
+      expect(await storage.findOutputTagMaps({ partial: {}, tagIds: [Number.MAX_SAFE_INTEGER] })).toEqual([])
+      expect(await storage.findOutputTagMaps({ partial: { outputId: setup.u1tx1o0.outputId }, tagIds: [] })).toEqual(
+        rows.filter(row => row.outputId === setup.u1tx1o0.outputId)
+      )
+      if (!(storage instanceof StorageIdb)) throw new Error('IndexedDB fixture required')
+      const owned: typeof rows = []
+      await storage.filterOutputTagMaps(
+        { partial: {}, tagIds: [] },
+        row => {
+          owned.push(row)
+        },
+        setup.u1.userId
+      )
+      expect(owned).toEqual(rows)
+      const foreign: typeof rows = []
+      await storage.filterOutputTagMaps(
+        { partial: {}, tagIds: [] },
+        row => {
+          foreign.push(row)
+        },
+        setup.u2.userId
+      )
+      expect(foreign).toEqual([])
     }
   })
 
