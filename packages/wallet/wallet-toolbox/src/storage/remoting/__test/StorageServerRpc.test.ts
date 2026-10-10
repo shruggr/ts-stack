@@ -185,13 +185,24 @@ describe('StorageServer JSON-RPC boundary', () => {
     const reqs = [{ ...time, provenTxReqId: 1, rawTx: bytes, inputBEEF: bytes, extraNumbers: bytes }]
     const server = makeServer({ findOutputsAuth: async () => outputs, findProvenTxReqsAuth: async () => reqs })
     for (const { method, params, rows, fields } of [
-      { method: 'findOutputsAuth', params: [{ identityKey: 'alice' }, { partial: {} }], rows: outputs,
-        fields: ['lockingScript'] },
+      {
+        method: 'findOutputsAuth',
+        params: [{ identityKey: 'alice' }, { partial: {} }],
+        rows: outputs,
+        fields: ['lockingScript']
+      },
       { method: 'findProvenTxReqs', params: [{ partial: {} }], rows: reqs, fields: ['rawTx', 'inputBEEF'] }
     ]) {
       const captured = makeResponse()
-      await invoke(server, 'handleRpcRequest', makeRequest({ jsonrpc: '2.0', method, params, id: 1 },
-        binary ? { [BINARY_ENCODING_HEADER]: BINARY_ENCODING } : {}), captured.response)
+      await invoke(
+        server,
+        'handleRpcRequest',
+        makeRequest(
+          { jsonrpc: '2.0', method, params, id: 1 },
+          binary ? { [BINARY_ENCODING_HEADER]: BINARY_ENCODING } : {}
+        ),
+        captured.response
+      )
       expect(captured.statusCode).toBe(200)
       for (const field of fields) {
         if (binary) expect(captured.body.result[0][field].$bsvBinary).toBe('base64')
@@ -203,6 +214,32 @@ describe('StorageServer JSON-RPC boundary', () => {
     expect(outputs[0].lockingScript).toBe(bytes)
     expect(reqs[0].rawTx).toBe(bytes)
   })
+
+  test.each([false, true])(
+    'retains the response ceiling for large row bytes with binary negotiation %s',
+    async binary => {
+      const bytes = Array.from({ length: 150_000 }, (_, i) => i % 256)
+      const now = new Date()
+      const rows = [{ provenTxReqId: 1, rawTx: bytes, created_at: now, updated_at: now }]
+      const server = makeServer({ findProvenTxReqsAuth: async () => rows }, { maxRpcResponseBytes: 300_000 })
+      const captured = makeResponse()
+      await invoke(
+        server,
+        'handleRpcRequest',
+        makeRequest(
+          { jsonrpc: '2.0', method: 'findProvenTxReqs', params: [{ partial: {} }], id: 1 },
+          binary ? { [BINARY_ENCODING_HEADER]: BINARY_ENCODING } : {}
+        ),
+        captured.response
+      )
+      expect(captured.statusCode).toBe(binary ? 200 : 413)
+      if (binary) {
+        expect(validateEntities(parseJsonRpc(JSON.stringify(captured.body), true).result)).toEqual(rows)
+        expect(Buffer.byteLength(JSON.stringify(captured.body))).toBeLessThan(300_000)
+      }
+      expect(rows[0].rawTx).toBe(bytes)
+    }
+  )
 
   test('accounts for HTML escaping when enforcing the response-size ceiling', async () => {
     const server = makeServer({ getSettings: () => ({ value: '<'.repeat(25) }) }, { maxRpcResponseBytes: 100 })

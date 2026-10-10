@@ -1,6 +1,6 @@
 import { BEEF_V1, Beef, Script, Transaction, UnlockingScript, Validation, type WalletInterface } from '@bsv/sdk'
 import { StorageClientBase } from '../StorageClientBase'
-import { stringifyJsonRpc } from '../BinaryJson'
+import { parseJsonRpc, stringifyJsonRpc } from '../BinaryJson'
 
 class CapturingStorageClient extends StorageClientBase {
   calls: Array<{ method: string; params: unknown[] }> = []
@@ -176,10 +176,37 @@ describe('StorageClientBase createAction inputBEEF pruning', () => {
     })
 
     expect((client.calls[0].params[1] as Validation.ValidCreateActionArgs).inputBEEF).toBeInstanceOf(Uint8Array)
-    expect(
-      (client.calls[1].params[1] as { target: Validation.ValidCreateActionArgs }).target.inputBEEF
-    ).toBeInstanceOf(Uint8Array)
+    expect((client.calls[1].params[1] as { target: Validation.ValidCreateActionArgs }).target.inputBEEF).toBeInstanceOf(
+      Uint8Array
+    )
     expect(target.inputBEEF).not.toBeInstanceOf(Uint8Array)
+  })
+
+  test.each([false, true])('preserves a large BEEF request with binary negotiation %s', async binary => {
+    const required = makeTransaction(1000)
+    required.addOutput({ satoshis: 0, lockingScript: Script.fromASM(`OP_FALSE OP_RETURN ${'ff'.repeat(150_000)}`) })
+    const beef = new Beef()
+    beef.mergeTransaction(required)
+    const originalBytes = beef.toBinary()
+    const args = Validation.validateCreateActionArgs({
+      description: 'forward large proof data',
+      inputs: [{ outpoint: `${required.id('hex')}.0`, unlockingScript: '00', inputDescription: 'large input' }],
+      inputBEEF: originalBytes,
+      outputs: [{ satoshis: 1, lockingScript: '51', outputDescription: 'replacement output' }]
+    })
+    const client = new CapturingStorageClient({} as WalletInterface, 'https://storage.example.test')
+    await client.createAction(auth, args)
+    const envelope = { jsonrpc: '2.0', method: 'createAction', params: client.calls[0].params, id: 1 }
+    const wire = stringifyJsonRpc(envelope, binary)
+    const decoded = parseJsonRpc(wire, binary).params[1].inputBEEF
+    expect(Array.from(decoded)).toEqual(originalBytes)
+    expect(args.inputBEEF).toEqual(originalBytes)
+    if (binary) {
+      expect(JSON.parse(wire).params[1].inputBEEF.$bsvBinary).toBe('base64')
+      expect(Buffer.byteLength(wire)).toBeLessThan(Buffer.byteLength(stringifyJsonRpc(envelope, false)) / 2)
+    } else {
+      expect(JSON.parse(wire).params[1].inputBEEF).toEqual(originalBytes)
+    }
   })
 
   test('preserves BEEF V1 when client-side pruning is required', async () => {

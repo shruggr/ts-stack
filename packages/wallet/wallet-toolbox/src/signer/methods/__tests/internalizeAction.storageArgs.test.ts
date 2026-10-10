@@ -24,17 +24,21 @@ describe('signer internalizeAction storage arguments', () => {
       }
     } as unknown as Wallet
 
-    await internalizeAction(wallet, { identityKey: `02${'11'.repeat(32)}`, userId: 1 }, {
-      tx: beef.toBinaryAtomic(txid),
-      outputs: [
-        {
-          outputIndex: 0,
-          protocol: 'basket insertion',
-          insertionRemittance: { basket: 'tokens', tags: [] }
-        }
-      ],
-      description: 'internalize as bytes'
-    })
+    await internalizeAction(
+      wallet,
+      { identityKey: `02${'11'.repeat(32)}`, userId: 1 },
+      {
+        tx: beef.toBinaryAtomic(txid),
+        outputs: [
+          {
+            outputIndex: 0,
+            protocol: 'basket insertion',
+            insertionRemittance: { basket: 'tokens', tags: [] }
+          }
+        ],
+        description: 'internalize as bytes'
+      }
+    )
 
     const sent = received[0] as { tx: unknown }
     expect(sent.tx).toBeInstanceOf(Uint8Array)
