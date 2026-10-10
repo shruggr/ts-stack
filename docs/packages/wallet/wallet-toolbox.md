@@ -4,9 +4,9 @@ title: '@bsv/wallet-toolbox'
 kind: package
 domain: wallet
 npm: '@bsv/wallet-toolbox'
-version: '2.14.6'
-last_updated: '2026-10-05'
-last_verified: '2026-10-05'
+version: '2.14.7'
+last_updated: '2026-10-10'
+last_verified: '2026-10-10'
 review_cadence_days: 30
 status: stable
 tags: ['wallet', 'brc100']
@@ -43,6 +43,11 @@ then use [BRC-38/39 integration](../../guides/wallet-data-portability.md), the
 [agent implementation brief](../../guides/wallet-recovery-agent-brief.md).
 The integration guide documents concrete-provider requirements, explicit
 restore/merge modes and the limits of the current in-memory export helpers.
+
+BRC-177 anchors cover both the delivery and an economic reclaim. When the
+reclaim floor is larger, the protected action pays the bounded surplus as
+miner fee while retaining no wallet change. Upgrade the active storage
+implementation to receive this funding fix; no wire or database migration is required.
 
 ## Current capabilities
 
