@@ -79,8 +79,8 @@
   },
   "homepage": "https://github.com/bsv-blockchain/ts-stack/tree/main/packages/wallet/wallet-toolbox#readme",
   "dependencies": {
-    "@bsv/auth-express-middleware": "workspace:^",
-    "@bsv/payment-express-middleware": "workspace:^",
+    "@bsv/auth-express-middleware": "^2.2.9",
+    "@bsv/payment-express-middleware": "^2.1.9",
     "@noble/hashes": "2.4.0",
     "@types/express": "^5.0.6",
     "better-sqlite3": "^13.0.3",
