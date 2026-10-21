@@ -1,5 +1,5 @@
 {
-  "name": "@bsv/sdk",
+  "name": "@bopen-io/sdk",
   "version": "4.0.0",
   "sideEffects": [
     "./dist/esm/src/umd.js",
@@ -17,7 +17,7 @@
     "access": "public"
   },
   "type": "module",
-  "description": "BSV Blockchain Software Development Kit",
+  "description": "Interim repack of @bsv/sdk at bsv-blockchain/ts-stack 41a6edb43 (#1243: @bsv/sdk 4.0, BRC-207 color module)",
   "main": "dist/cjs/mod.js",
   "module": "dist/esm/mod.js",
   "types": "dist/types/mod.d.ts",
@@ -839,7 +839,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bsv-blockchain/ts-stack.git",
+    "url": "git+https://github.com/shruggr/ts-stack.git",
     "directory": "packages/sdk"
   },
   "keywords": [

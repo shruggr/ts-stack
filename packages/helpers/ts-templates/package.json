@@ -1,5 +1,5 @@
 {
-  "name": "@bsv/templates",
+  "name": "@bopen-io/templates",
   "version": "2.1.0",
   "sideEffects": false,
   "engines": {
@@ -9,7 +9,7 @@
     "access": "public"
   },
   "type": "module",
-  "description": "BSV Blockchain Script Templates",
+  "description": "Interim repack of @bsv/templates at bsv-blockchain/ts-stack 41a6edb43 (#1243: @bsv/sdk 4.0, BRC-207 color module)",
   "main": "./dist/mod.cjs",
   "module": "./dist/mod.js",
   "types": "./dist/mod.d.ts",
@@ -58,7 +58,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bsv-blockchain/ts-stack.git",
+    "url": "git+https://github.com/shruggr/ts-stack.git",
     "directory": "packages/helpers/ts-templates"
   },
   "keywords": [

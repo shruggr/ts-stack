@@ -1,5 +1,5 @@
 {
-  "name": "@bsv/wallet-toolbox-client",
+  "name": "@bopen-io/wallet-toolbox-client",
   "version": "2.15.0",
   "type": "module",
   "sideEffects": false,
@@ -9,7 +9,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Browser-safe BRC-100 wallet, storage, signer, and services components",
+  "description": "Interim repack of @bsv/wallet-toolbox-client at bsv-blockchain/ts-stack 41a6edb43 (#1243: @bsv/sdk 4.0, BRC-207 color module)",
   "main": "./out/index.client.cjs",
   "module": "./out/index.client.mjs",
   "browser": "./out/index.client.mjs",
@@ -40,7 +40,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bsv-blockchain/ts-stack.git",
+    "url": "git+https://github.com/shruggr/ts-stack.git",
     "directory": "packages/wallet/wallet-toolbox/client"
   },
   "author": "BSV Association",

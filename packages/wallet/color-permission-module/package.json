@@ -1,5 +1,5 @@
 {
-  "name": "@bsv/color-permission-module",
+  "name": "@bopen-io/color-permission-module",
   "version": "0.1.0",
   "sideEffects": false,
   "engines": {
@@ -8,7 +8,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "BRC-207 1Color wallet module for BRC-162 fungible tokens in BRC-100 wallets",
+  "description": "Interim repack of @bsv/color-permission-module at bsv-blockchain/ts-stack 41a6edb43 (#1243: @bsv/sdk 4.0, BRC-207 color module)",
   "type": "module",
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
@@ -72,7 +72,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bsv-blockchain/ts-stack.git",
+    "url": "git+https://github.com/shruggr/ts-stack.git",
     "directory": "packages/wallet/color-permission-module"
   },
   "bugs": {
