@@ -116,6 +116,7 @@ function addPlannedOutputs(
 function addRequestedInput(
   tx: Transaction,
   argsInput: ValidCreateActionInput,
+  storageInput: StorageCreateTransactionSdkInput,
   args: ValidCreateActionArgs,
   inputBeef: Beef | undefined
 ): void {
@@ -124,7 +125,11 @@ function addRequestedInput(
   tx.addInput({
     sourceTXID: argsInput.outpoint.txid,
     sourceOutputIndex: argsInput.outpoint.vout,
-    sourceTransaction: args.isSignAction ? inputBeef?.findTxid(argsInput.outpoint.txid)?.tx : undefined,
+    // The caller's inputBEEF first; otherwise the source transaction storage returned for an
+    // input it already knows (options.trustSelf 'known' + includeAllSourceTransactions).
+    sourceTransaction: args.isSignAction
+      ? (inputBeef?.findTxid(argsInput.outpoint.txid)?.tx ?? sourceTransactionForStorageInput(storageInput))
+      : undefined,
     unlockingScript,
     sequence: argsInput.sequenceNumber
   })
@@ -183,7 +188,7 @@ function addPlannedInputs(
   let totalChangeInputs = 0
   for (const { storageInput, argsInput } of inputs) {
     if (argsInput != null) {
-      addRequestedInput(tx, argsInput, args, inputBeef)
+      addRequestedInput(tx, argsInput, storageInput, args, inputBeef)
       continue
     }
     totalChangeInputs += addStorageInput(tx, storageInput, pendingStorageInputs)
