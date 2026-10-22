@@ -8,7 +8,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Interim repack of @bsv/color-permission-module at bsv-blockchain/ts-stack 41a6edb43 (#1243: @bsv/sdk 4.0, BRC-207 color module) with ts-stack#1338 (inputBEEF for module-selected inputs)",
+  "description": "Interim repack of @bsv/color-permission-module at bsv-blockchain/ts-stack 41a6edb43 (#1243: @bsv/sdk 4.0, BRC-207 color module) with ts-stack#1338 (inputBEEF for module-selected inputs, input records kept to signAction)",
   "type": "module",
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
