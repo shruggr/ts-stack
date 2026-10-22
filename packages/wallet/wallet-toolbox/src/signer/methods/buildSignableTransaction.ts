@@ -28,7 +28,7 @@ export function buildSignableTransaction(
 } {
   const changeKeys = wallet.getClientChangeKeyPair()
 
-  const inputBeef = args.inputBEEF != null ? Beef.fromBinaryStrict(args.inputBEEF) : undefined
+  const sources = args.isSignAction ? makeSourceLookup(dctr, args) : undefined
 
   const { inputs: storageInputs, outputs: storageOutputs } = dctr
 
@@ -53,7 +53,7 @@ export function buildSignableTransaction(
   addPlannedOutputs(tx, storageOutputs, dctr, args, changeKeys, wallet)
 
   const pendingStorageInputs: PendingStorageInput[] = []
-  const totalChangeInputs = addPlannedInputs(tx, storageInputs, args, inputBeef, pendingStorageInputs)
+  const totalChangeInputs = addPlannedInputs(tx, storageInputs, args, sources, pendingStorageInputs)
 
   // The amount is the total of non-foreign inputs minus change outputs
   // Note that the amount can be negative when we are redeeming more inputs than we are spending
@@ -113,23 +113,38 @@ function addPlannedOutputs(
   }
 }
 
+type SourceLookup = (txid: string) => Transaction | undefined
+
+/**
+ * Source transactions for a signable transaction come from the input BEEF
+ * storage returned: the caller's inputBEEF merged with storage's proven
+ * transactions for change and for declared inputs the caller did not supply.
+ * They carry their merkle paths and ancestors, so the signable BEEF and the
+ * result BEEF are valid. A txid the caller listed in knownTxids is txid-only
+ * there; its source then comes from the caller's own inputBEEF.
+ */
+function makeSourceLookup(dctr: StorageCreateActionResult, args: ValidCreateActionArgs): SourceLookup {
+  const storageBeef = parseInputBeef(dctr.inputBeef)
+  const callerBeef = args.inputBEEF != null ? Beef.fromBinaryStrict(args.inputBEEF) : undefined
+  return txid => storageBeef?.findAtomicTransaction(txid) ?? callerBeef?.findTxid(txid)?.tx
+}
+
+function parseInputBeef(inputBeef: StorageCreateActionResult['inputBeef']): Beef | undefined {
+  if (inputBeef == null) return undefined
+  return inputBeef instanceof Uint8Array ? Beef.fromBinaryView(inputBeef) : Beef.fromBinaryStrict(inputBeef)
+}
+
 function addRequestedInput(
   tx: Transaction,
   argsInput: ValidCreateActionInput,
-  storageInput: StorageCreateTransactionSdkInput,
-  args: ValidCreateActionArgs,
-  inputBeef: Beef | undefined
+  sources: SourceLookup | undefined
 ): void {
   const unlockingScript =
     typeof argsInput.unlockingScript === 'string' ? asBsvSdkScript(argsInput.unlockingScript) : new Script()
   tx.addInput({
     sourceTXID: argsInput.outpoint.txid,
     sourceOutputIndex: argsInput.outpoint.vout,
-    // The caller's inputBEEF first; otherwise the source transaction storage returned for an
-    // input it already knows (options.trustSelf 'known' + includeAllSourceTransactions).
-    sourceTransaction: args.isSignAction
-      ? (inputBeef?.findTxid(argsInput.outpoint.txid)?.tx ?? sourceTransactionForStorageInput(storageInput))
-      : undefined,
+    sourceTransaction: sources?.(argsInput.outpoint.txid),
     unlockingScript,
     sequence: argsInput.sequenceNumber
   })
@@ -145,6 +160,7 @@ function sourceTransactionForStorageInput(storageInput: StorageCreateTransaction
 function addStorageInput(
   tx: Transaction,
   storageInput: StorageCreateTransactionSdkInput,
+  sources: SourceLookup | undefined,
   pendingStorageInputs: PendingStorageInput[]
 ): number {
   if (storageInput.type !== 'P2PKH') {
@@ -164,7 +180,7 @@ function addStorageInput(
   tx.addInput({
     sourceTXID: storageInput.sourceTxid,
     sourceOutputIndex: storageInput.sourceVout,
-    sourceTransaction: sourceTransactionForStorageInput(storageInput),
+    sourceTransaction: sources?.(storageInput.sourceTxid) ?? sourceTransactionForStorageInput(storageInput),
     unlockingScript: new Script(),
     sequence: 0xffffffff
   })
@@ -175,7 +191,7 @@ function addPlannedInputs(
   tx: Transaction,
   storageInputs: StorageCreateTransactionSdkInput[],
   args: ValidCreateActionArgs,
-  inputBeef: Beef | undefined,
+  sources: SourceLookup | undefined,
   pendingStorageInputs: PendingStorageInput[]
 ): number {
   const inputs = storageInputs
@@ -188,10 +204,10 @@ function addPlannedInputs(
   let totalChangeInputs = 0
   for (const { storageInput, argsInput } of inputs) {
     if (argsInput != null) {
-      addRequestedInput(tx, argsInput, storageInput, args, inputBeef)
+      addRequestedInput(tx, argsInput, sources)
       continue
     }
-    totalChangeInputs += addStorageInput(tx, storageInput, pendingStorageInputs)
+    totalChangeInputs += addStorageInput(tx, storageInput, sources, pendingStorageInputs)
   }
   return totalChangeInputs
 }
