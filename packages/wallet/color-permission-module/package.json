@@ -1,6 +1,6 @@
 {
   "name": "@bopen-io/color-permission-module",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "sideEffects": false,
   "engines": {
     "node": ">=22"
@@ -8,7 +8,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Interim repack of @bsv/color-permission-module at bsv-blockchain/ts-stack 41a6edb43 (#1243: @bsv/sdk 4.0, BRC-207 color module) with ts-stack#1338 (inputBEEF for module-selected inputs, input records kept to signAction)",
+  "description": "Interim repack of @bsv/color-permission-module at bsv-blockchain/ts-stack 41a6edb43 (#1243: @bsv/sdk 4.0, BRC-207 color module) with ts-stack#1338 at b240c11ba (inputBEEF for module-selected inputs by suffix tag, input records bound to the action reference)",
   "type": "module",
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",

@@ -12,6 +12,7 @@ import {
   type CreateActionArgs,
   type CreateActionInput,
   type CreateActionOutput,
+  type CreateActionResult,
   type CreateSignatureArgs,
   type InternalizeActionArgs,
   type ListActionsArgs,
@@ -51,6 +52,8 @@ import {
   COLOR_KEY_ID,
   colorProtocolID,
   colorTopic,
+  derivationSuffixTag,
+  isDerivationSuffixTag,
   DISCOVERY_TOPIC,
   ISSUE,
   outpointString,
@@ -93,8 +96,6 @@ const DEFAULT_SIGHASH = TransactionSignature.SIGHASH_ALL | TransactionSignature.
 const MAX_ENVELOPE_BYTES = 16 * 1024 * 1024
 const MAX_RECEIPT_INSTRUCTION_BYTES = 1000
 const LIST_PAGE_LIMIT = 10_000
-/** Outputs per page when reading selected inputs' source transactions, which carry BEEF. */
-const INPUT_BEEF_PAGE_LIMIT = 10
 const SUBMIT_ATTEMPTS = 3
 const NOSEND_EXPIRY_LABEL_PREFIX = 'p nosend expiry '
 const STATE_TAG_PREFIX = 'color_state_'
@@ -119,6 +120,8 @@ interface Candidate extends SourceOutput {
   token: TokenOutput
   amount: bigint
   customInstructions: string
+  /** The tags the wallet listed for the output. */
+  tags: readonly string[]
 }
 
 export interface ManagedInput extends SourceOutput {
@@ -173,6 +176,29 @@ function mergeSource(into: Beef, from: Beef, outpoint: string): void {
       `BRC-207: the wallet returned no source transaction for token input ${outpoint}`
     )
   into.mergeBeef(from.toBinaryAtomic(txid))
+}
+
+/** The tag every output the module files carries: the module finds an output's transaction by it. */
+function suffixTagOf(custody: { derivationSuffix: string }): string {
+  return derivationSuffixTag(custody.derivationSuffix)
+}
+
+/** `tags` with the custody's suffix tag added. */
+function withSuffixTag(
+  tags: readonly string[] | undefined,
+  custody: { derivationSuffix: string }
+): string[] {
+  return [...new Set([...(tags ?? []), suffixTagOf(custody)])]
+}
+
+/** Whether a listed output carries the suffix tag of its custody. */
+function carriesSuffixTag(tags: readonly string[] | undefined, custody: Custody): boolean {
+  return tags?.includes(suffixTagOf(custody)) === true
+}
+
+/** The BEEF a listOutputs result returns, empty when it returns none. */
+function listingBeef(listing: ListOutputsResult): Beef {
+  return listing.BEEF === undefined ? new Beef() : Beef.fromBinary(listing.BEEF)
 }
 
 function tokenInputs(inputs: readonly ManagedInput[]): CreateActionInput[] {
@@ -822,11 +848,14 @@ export function tryReadTokenOutput(
   }
 }
 
-/** A record with its stored tags and the computed state tag in place of any stored one. */
+/** A record with its stored tags, less suffix tags, and the computed state tag in place of any stored one. */
 function inventoryView(record: InventoryRecord): InventoryView {
   const state = inventoryState(record)
   const tags = [
-    ...(record.output.tags ?? []).filter(tag => !tag.startsWith(STATE_TAG_PREFIX)),
+    // The suffix tag is the module's own index into the basket; apps see the stored tags without it.
+    ...(record.output.tags ?? []).filter(
+      tag => !tag.startsWith(STATE_TAG_PREFIX) && !isDerivationSuffixTag(tag)
+    ),
     `${STATE_TAG_PREFIX}${state}`
   ]
   return { record, state, tags }
@@ -869,11 +898,10 @@ export class ColorPermissionModule implements PermissionsModule {
   readonly capabilities: Readonly<Record<string, string>> = { 'brc207-color': '5' }
   /** Outputs a send in progress has selected, so a concurrent send does not select them too. */
   protected readonly selected = new Set<string>()
-  /**
-   * The managed inputs of each funded action, by outpoint, kept from createAction until its
-   * signAction so the module signs from its own records instead of listing the wallet's outputs.
-   */
-  protected readonly held = new Map<string, ManagedInput>()
+  /** The managed inputs of funded actions whose createAction has not come back, by outpoint. */
+  protected readonly staged = new Map<string, ManagedInput>()
+  /** The managed inputs the module signs for, by the action reference they were bound to. */
+  protected readonly bound = new Map<string, ManagedInput[]>()
   protected readonly supportedAssets = new Map<string, Promise<void>>()
   protected identityKey?: Promise<string>
 
@@ -888,10 +916,11 @@ export class ColorPermissionModule implements PermissionsModule {
     this.requestTokenAccess = options.requestTokenAccess
   }
 
-  /** Clears in-memory selections, kept input records and asset checks. */
+  /** Clears in-memory selections, staged and bound input records and asset checks. */
   dispose(): void {
     this.selected.clear()
-    this.held.clear()
+    this.staged.clear()
+    this.bound.clear()
     this.supportedAssets.clear()
     this.identityKey = undefined
   }
@@ -939,9 +968,9 @@ export class ColorPermissionModule implements PermissionsModule {
           args: await this.signAction(req.args as SignActionArgs, req.action, req.originator)
         }
       case 'internalizeAction': {
-        const args = req.args as InternalizeActionArgs
-        await this.internalizeAction(args, req.originator)
-        return { args }
+        return {
+          args: await this.internalizeAction(req.args as InternalizeActionArgs, req.originator)
+        }
       }
       case 'listActions': {
         const args = req.args as ListActionsArgs
@@ -960,6 +989,7 @@ export class ColorPermissionModule implements PermissionsModule {
     res: unknown,
     context: { method: string; originator: string; action?: PermissionsModuleAction }
   ): Promise<unknown> {
+    if (context.method === 'createAction') this.bindAction(res as CreateActionResult)
     if (context.method === 'signAction' && context.action !== undefined) {
       await this.fileDeploy(res as SignActionResult, context.action, context.originator)
       // A noSend action is always a BRC-177 handoff (createAction refuses any other): its
@@ -987,10 +1017,10 @@ export class ColorPermissionModule implements PermissionsModule {
       txid,
       vout: 0
     })
-    const owned = ColorPlan.fromLabels(action.createArgs?.labels)?.ownedOutputs.some(
-      remittance => remittance.outputIndex === 0 && remittance.assetId === ISSUE
+    const remittance = ColorPlan.fromLabels(action.createArgs?.labels)?.ownedOutputs.find(
+      owned => owned.outputIndex === 0 && owned.assetId === ISSUE
     )
-    if (deploy?.deploy !== true || owned !== true) return
+    if (deploy?.deploy !== true || remittance === undefined) return
     // The underlying wallet merges the insertion into its own signed transaction: the basket and
     // the custody (encrypted at createAction) are assigned and the transaction's status is kept.
     const customInstructions = action.createArgs?.outputs?.[0]?.customInstructions
@@ -1004,7 +1034,8 @@ export class ColorPermissionModule implements PermissionsModule {
             protocol: 'basket insertion',
             insertionRemittance: {
               basket: assetBasket(deploy.assetId, deploy.role),
-              ...(customInstructions === undefined ? {} : { customInstructions })
+              ...(customInstructions === undefined ? {} : { customInstructions }),
+              tags: [suffixTagOf(remittance)]
             }
           }
         ]
@@ -1017,11 +1048,14 @@ export class ColorPermissionModule implements PermissionsModule {
    * Receive
    * ---------------------------------------------------------------------- */
 
-  /** Verifies every `p color` receipt; the caller must already have submitted the transaction. */
+  /**
+   * Verifies every `p color` receipt and tags it with its derivation suffix; the caller must
+   * already have submitted the transaction.
+   */
   protected async internalizeAction(
     args: InternalizeActionArgs,
     originator: string
-  ): Promise<void> {
+  ): Promise<InternalizeActionArgs> {
     if ((args.labels ?? []).some(label => label.startsWith(`${COLOR_BASKET_NAMESPACE} `))) {
       throw new Error('BRC-207: p color labels have no meaning in internalizeAction')
     }
@@ -1033,11 +1067,27 @@ export class ColorPermissionModule implements PermissionsModule {
         ? [{ outputIndex: output.outputIndex, remittance }]
         : []
     })
-    if (receipts.length === 0) return
+    if (receipts.length === 0) return args
     await this.assertCompletedTransaction(tx)
+    const tags = new Map<number, string[]>()
     await eachInOrder(receipts, async ({ outputIndex, remittance }) => {
-      await this.verifyReceipt(tx, outputIndex, remittance, originator)
+      const custody = await this.verifyReceipt(tx, outputIndex, remittance, originator)
+      tags.set(outputIndex, withSuffixTag(remittance.tags, custody))
     })
+    return {
+      ...args,
+      outputs: args.outputs.map(output =>
+        output.insertionRemittance === undefined || !tags.has(output.outputIndex)
+          ? output
+          : {
+              ...output,
+              insertionRemittance: {
+                ...output.insertionRemittance,
+                tags: tags.get(output.outputIndex)
+              }
+            }
+      )
+    }
   }
 
   /**
@@ -1064,7 +1114,7 @@ export class ColorPermissionModule implements PermissionsModule {
     outputIndex: number,
     remittance: BasketInsertion,
     originator: string
-  ): Promise<void> {
+  ): Promise<Custody> {
     const target = parseAssetBasket(remittance.basket)
     if (target === undefined)
       throw new Error('BRC-207: a receipt must name a per-asset value or authority basket')
@@ -1097,6 +1147,7 @@ export class ColorPermissionModule implements PermissionsModule {
         'BRC-207: the received output is not admitted and unspent in its asset overlay'
       )
     }
+    return custody
   }
 
   /* ----------------------------------------------------------------------
@@ -1125,9 +1176,8 @@ export class ColorPermissionModule implements PermissionsModule {
     assertPlanSupported(plan, args)
     const { planned, outputs } = await this.planOutputs(plan, args, originator)
     // The hold keeps concurrent sends in this module from choosing the same outputs while it plans.
-    // It ends when this handler returns: the wallet then reserves the inputs and leaves them out of
-    // its listings, and storage rejects a second action that tries to spend one. The input records
-    // are kept in `held` until signAction, which signs from them.
+    // Once this handler returns, the inputs are staged until the action's createAction comes back
+    // (onResponse) and moves them to its reference; storage has then reserved them.
     const reserved = new Set<string>()
     try {
       const explicit = await this.explicitInputs(args, originator)
@@ -1142,15 +1192,47 @@ export class ColorPermissionModule implements PermissionsModule {
       )
       sighashScopes(plan, new Set([...explicit.managed, ...inputs].map(input => input.outpoint)))
       const inputBEEF = await this.inputBeef(args.inputBEEF, inputs, originator)
-      for (const input of [...explicit.managed, ...inputs]) this.held.set(input.outpoint, input)
-      return {
+      const funded = {
         ...args,
         inputs: orderInputs(explicit.inputs, tokenInputs(inputs), plan.inputPositions),
         outputs: placeChange(outputs, changes, plan.changePositions),
         ...(inputBEEF === undefined ? {} : { inputBEEF })
       }
+      this.stage([...explicit.managed, ...inputs])
+      return funded
     } finally {
       for (const outpoint of reserved) this.selected.delete(outpoint)
+    }
+  }
+
+  /** Stages a funded action's managed inputs until its createAction comes back. */
+  protected stage(inputs: readonly ManagedInput[]): void {
+    for (const input of inputs) this.staged.set(input.outpoint, input)
+  }
+
+  /**
+   * Moves the staged inputs the returned transaction spends to its action reference. A result
+   * without a signable transaction binds nothing; its named inputs are only unstaged.
+   */
+  protected bindAction(result: CreateActionResult): void {
+    const signable = result.signableTransaction
+    const atomic = signable?.tx ?? result.tx
+    if (atomic === undefined) return
+    let tx: Transaction
+    try {
+      tx = Transaction.fromAtomicBEEF(atomic)
+    } catch {
+      return // the manager refuses a malformed transaction itself
+    }
+    for (const input of tx.inputs) {
+      const outpoint = inputOutpoint(input)
+      const staged = this.staged.get(outpoint)
+      if (staged === undefined) continue
+      this.staged.delete(outpoint)
+      if (signable === undefined) continue
+      const records = this.bound.get(signable.reference) ?? []
+      records.push(staged)
+      this.bound.set(signable.reference, records)
     }
   }
 
@@ -1187,7 +1269,8 @@ export class ColorPermissionModule implements PermissionsModule {
         basket: toolbox.specOpBasketPrefixOutputs,
         tags: [COLOR_BASKET_NAMESPACE],
         include: 'locking scripts',
-        includeCustomInstructions: true
+        includeCustomInstructions: true,
+        includeTags: true
       },
       originator
     )
@@ -1214,11 +1297,15 @@ export class ColorPermissionModule implements PermissionsModule {
     output: WalletOutput,
     originator: string
   ): Promise<void> {
-    if (!output.spendable)
+    if (!output.spendable || this.staged.has(output.outpoint) || this.selected.has(output.outpoint))
       throw new Error('BRC-207: an explicit p color input is reserved by another action')
     const managed = await this.managedInput(output, originator)
     if (managed === undefined)
       throw new Error('BRC-207: an explicit p color input is not a managed token output')
+    if (!carriesSuffixTag(output.tags, managed.custody))
+      throw new Error(
+        `BRC-207: token output ${managed.outpoint} was filed without its suffix tag and is not spendable through the module`
+      )
     await this.assertSupportedAsset(managed.assetId)
     if (
       !(await this.spendable(managed.assetId, [managed])).has(managed.outpoint) &&
@@ -1412,7 +1499,8 @@ export class ColorPermissionModule implements PermissionsModule {
     return {
       ...output,
       basket,
-      customInstructions: custodyInstructions(custodyOf(remittance))
+      customInstructions: custodyInstructions(custodyOf(remittance)),
+      tags: withSuffixTag(output.tags, remittance)
     }
   }
 
@@ -1680,39 +1768,50 @@ export class ColorPermissionModule implements PermissionsModule {
       callerBEEF === undefined ? new Beef() : parsed('inputBEEF', () => Beef.fromBinary(callerBEEF))
     const baskets = new Map<string, ManagedInput[]>()
     for (const input of inputs) {
-      if (input.sourceBEEF === undefined) {
-        const basket = assetBasket(input.assetId, input.role)
-        baskets.set(basket, [...(baskets.get(basket) ?? []), input])
-      } else mergeSource(beef, Beef.fromBinary(input.sourceBEEF), input.outpoint)
+      if (input.sourceBEEF !== undefined) {
+        mergeSource(beef, Beef.fromBinary(input.sourceBEEF), input.outpoint)
+        continue
+      }
+      const basket = assetBasket(input.assetId, input.role)
+      baskets.set(basket, [...(baskets.get(basket) ?? []), input])
     }
-    await eachInOrder(baskets, async ([basket, held]) => {
-      const sources = await this.sourceTransactions(basket, held, originator)
-      for (const input of held) mergeSource(beef, sources, input.outpoint)
+    await eachInOrder(baskets, async ([basket, selected]) => {
+      const sources = await this.sourceTransactions(basket, selected, originator)
+      for (const input of selected) mergeSource(beef, sources, input.outpoint)
     })
     return beef.toBinary()
   }
 
   /**
-   * Reads one basket with entire transactions, a page at a time, until every input's source
-   * transaction has been returned, so no more BEEF is read than the selection needs.
+   * The selected inputs of one basket with their entire transactions, in one listing by their
+   * suffix tags. The listing must return exactly the selected outputs.
    */
   protected async sourceTransactions(
     basket: string,
-    inputs: readonly ManagedInput[],
+    selected: readonly ManagedInput[],
     originator: string
   ): Promise<Beef> {
-    const txids = new Set(inputs.map(input => parseOutpoint(input.outpoint).txid))
-    const beef = new Beef()
-    for (let offset = 0; [...txids].some(txid => !holdsTransaction(beef, txid));) {
-      const page = await this.wallet.listOutputs(
-        { basket, include: 'entire transactions', limit: INPUT_BEEF_PAGE_LIMIT, offset },
-        originator
+    const listing = await this.wallet.listOutputs(
+      {
+        basket,
+        tags: selected.map(input => suffixTagOf(input.custody)),
+        tagQueryMode: 'any',
+        include: 'entire transactions',
+        limit: selected.length
+      },
+      originator
+    )
+    const wanted = new Set(selected.map(input => input.outpoint))
+    const returned = new Set(listing.outputs.map(output => output.outpoint))
+    const missing = [...wanted].filter(outpoint => !returned.has(outpoint))
+    const extra = [...returned].filter(outpoint => !wanted.has(outpoint))
+    if (missing.length > 0 || extra.length > 0 || listing.outputs.length !== wanted.size)
+      throw new Error(
+        `BRC-207: the wallet returned other outputs than the selected token inputs: missing ${
+          missing.join(', ') || 'none'
+        }; extra ${extra.join(', ') || 'none'}`
       )
-      if (page.BEEF !== undefined) beef.mergeBeef(page.BEEF)
-      offset += page.outputs.length
-      if (page.outputs.length < INPUT_BEEF_PAGE_LIMIT) break
-    }
-    return beef
+    return listingBeef(listing)
   }
 
   /** One basket's token outputs of the asset, read from their locking scripts, excluding selected ones. */
@@ -1721,14 +1820,30 @@ export class ColorPermissionModule implements PermissionsModule {
     role: TokenRole,
     originator: string
   ): Promise<Candidate[]> {
-    const outputs = await this.listBasket(assetBasket(assetId, role), originator, {})
+    const outputs = await this.listBasket(assetBasket(assetId, role), originator, {
+      includeTags: true
+    })
     return outputs.flatMap(output => {
-      if (this.selected.has(output.outpoint) || output.customInstructions === undefined) return []
+      if (
+        output.spendable === false ||
+        this.selected.has(output.outpoint) ||
+        this.staged.has(output.outpoint) ||
+        output.customInstructions === undefined ||
+        // An output without a suffix tag cannot be fetched by it, so it is not selected.
+        !(output.tags ?? []).some(isDerivationSuffixTag)
+      )
+        return []
       const source = this.sourceOutput(output)
       const token = tryReadTokenOutput(source.lockingScript, parseOutpoint(output.outpoint))
       if (token?.assetId !== assetId || token.role !== role) return []
       return [
-        { ...source, token, amount: token.amount, customInstructions: output.customInstructions }
+        {
+          ...source,
+          token,
+          amount: token.amount,
+          customInstructions: output.customInstructions,
+          tags: output.tags ?? []
+        }
       ]
     })
   }
@@ -1739,12 +1854,15 @@ export class ColorPermissionModule implements PermissionsModule {
     originator: string
   ): Promise<ManagedInput | undefined> {
     try {
-      const { outpoint, lockingScript, satoshis, token, customInstructions } = candidate
-      return await this.custodyInput(
+      const { outpoint, lockingScript, satoshis, token, customInstructions, tags } = candidate
+      const input = await this.custodyInput(
         { outpoint, lockingScript, satoshis, token },
         customInstructions,
         originator
       )
+      // An output not tagged with its custody's suffix cannot be fetched by it, so it is skipped.
+      if (input === undefined || !carriesSuffixTag(tags, input.custody)) return undefined
+      return input
     } catch {
       return undefined
     }
@@ -1881,6 +1999,7 @@ export class ColorPermissionModule implements PermissionsModule {
         satoshis: TOKEN_CARRIER_SATOSHIS,
         basket: assetBasket(assetId, 'value'),
         customInstructions: custodyInstructions(custody),
+        tags: [suffixTagOf(custody)],
         outputDescription: 'BRC-207 token change'
       }
     }
@@ -1904,26 +2023,19 @@ export class ColorPermissionModule implements PermissionsModule {
     const tx = action.transaction
     const tokens = transactionTokens(tx, true)
     assertTransactionOperations(plan, tokens)
-    const managed = this.heldInputs(createArgs)
+    // Only the records bound to this reference are the module's to sign.
+    const managed = this.bound.get(action.reference) ?? []
     try {
-      return await this.signHeld(args, { plan, createArgs, tx, tokens }, managed, originator)
+      return await this.signBound(args, { plan, createArgs, tx, tokens }, managed, originator)
     } finally {
       // Signed, refused or failed, the action is done with these records; the manager aborts a
       // refused or failed action, which returns its inputs to the wallet.
-      for (const input of managed) this.held.delete(input.outpoint)
+      this.bound.delete(action.reference)
     }
   }
 
-  /** The kept records of the module's inputs among the action's inputs. */
-  protected heldInputs(createArgs: CreateActionArgs): ManagedInput[] {
-    return (createArgs.inputs ?? []).flatMap(input => {
-      const managed = this.held.get(input.outpoint)
-      return managed === undefined ? [] : [managed]
-    })
-  }
-
   /** Rechecks, approves and signs the module's inputs of a funded action. */
-  protected async signHeld(
+  protected async signBound(
     args: SignActionArgs,
     funded: {
       plan: ColorPlan
@@ -2336,7 +2448,7 @@ export class ColorPermissionModule implements PermissionsModule {
   protected async listBasket(
     basket: string,
     originator: string,
-    filter: Pick<ListOutputsArgs, 'tags' | 'tagQueryMode'>
+    filter: Pick<ListOutputsArgs, 'tags' | 'tagQueryMode' | 'includeTags'>
   ): Promise<WalletOutput[]> {
     const outputs: WalletOutput[] = []
     for (;;) {
@@ -2345,6 +2457,7 @@ export class ColorPermissionModule implements PermissionsModule {
           basket,
           tags: filter.tags,
           tagQueryMode: filter.tagQueryMode,
+          includeTags: filter.includeTags,
           include: 'locking scripts',
           includeCustomInstructions: true,
           limit: LIST_PAGE_LIMIT,
