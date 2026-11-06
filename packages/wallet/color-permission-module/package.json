@@ -1,6 +1,6 @@
 {
-  "name": "@bsv/color-permission-module",
-  "version": "0.2.0",
+  "name": "@bopen-io/color-permission-module",
+  "version": "0.2.1",
   "sideEffects": false,
   "engines": {
     "node": ">=22"
@@ -8,7 +8,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "BRC-207 1Color wallet module for BRC-162 fungible tokens in BRC-100 wallets",
+  "description": "Interim repack of @bsv/color-permission-module 0.2.0 (bsv-blockchain/ts-stack eb131148c) with bsv-blockchain/ts-stack#1518: the basket-prefix listing reads pass a limit, so `p color assets` is not cut to ten outputs while a noSend action is pending",
   "type": "module",
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
@@ -73,7 +73,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bsv-blockchain/ts-stack.git",
+    "url": "git+https://github.com/shruggr/ts-stack.git",
     "directory": "packages/wallet/color-permission-module"
   },
   "bugs": {
