@@ -8,7 +8,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Interim repack of @bsv/color-permission-module 0.2.0 (bsv-blockchain/ts-stack eb131148c) with bsv-blockchain/ts-stack#1518 (the basket-prefix listing reads pass a limit) and the receive fix: a received transaction is judged by its output and the overlay, not its inputs, so a mined transaction can be taken in",
+  "description": "Interim repack of @bsv/color-permission-module 0.2.0 (bsv-blockchain/ts-stack eb131148c) with bsv-blockchain/ts-stack#1518 (the basket-prefix listing reads pass a limit) and the receive fix: a proven received transaction is not re-checked against its input sources (its merkle proof is the evidence), so a mined transaction can be taken in",
   "type": "module",
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
