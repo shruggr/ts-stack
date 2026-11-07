@@ -1,6 +1,6 @@
 {
   "name": "@bopen-io/color-permission-module",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "sideEffects": false,
   "engines": {
     "node": ">=22"
@@ -8,7 +8,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Interim repack of @bsv/color-permission-module 0.2.0 (bsv-blockchain/ts-stack eb131148c) with bsv-blockchain/ts-stack#1518: the basket-prefix listing reads pass a limit, so `p color assets` is not cut to ten outputs while a noSend action is pending",
+  "description": "Interim repack of @bsv/color-permission-module 0.2.0 (bsv-blockchain/ts-stack eb131148c) with bsv-blockchain/ts-stack#1518 (the basket-prefix listing reads pass a limit) and the receive fix: a received transaction is judged by its output and the overlay, not its inputs, so a mined transaction can be taken in",
   "type": "module",
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
